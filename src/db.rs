@@ -166,6 +166,15 @@ pub async fn update_stream(pool: &SqlitePool, current: &Stream, config: &StreamC
     Ok(())
 }
 
+/// Restart a stream's recorder without changing anything else.
+pub async fn bump_revision(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let done = sqlx::query("UPDATE streams SET revision = revision + 1 WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(done.rows_affected() > 0)
+}
+
 /// Deletes the stream's rows. Its files are removed by the server once the recorder has stopped,
 /// or by the next startup reconcile.
 pub async fn delete_stream(pool: &SqlitePool, id: i64) -> Result<()> {
@@ -416,6 +425,49 @@ pub async fn stream_summaries(pool: &SqlitePool) -> Result<Vec<StreamSummary>> {
     )
     .fetch_all(pool)
     .await?)
+}
+
+pub async fn stream_summary(pool: &SqlitePool, id: i64) -> Result<Option<StreamSummary>> {
+    Ok(stream_summaries(pool).await?.into_iter().find(|s| s.id == id))
+}
+
+pub async fn total_segment_bytes(pool: &SqlitePool) -> Result<i64> {
+    Ok(sqlx::query_scalar("SELECT COALESCE(SUM(bytes), 0) FROM segments")
+        .fetch_one(pool)
+        .await?)
+}
+
+pub async fn create_web_session(pool: &SqlitePool, token_hash: &str, expires_at: i64) -> Result<()> {
+    let now = now_ms();
+    sqlx::query("DELETE FROM web_sessions WHERE expires_at < ?")
+        .bind(now)
+        .execute(pool)
+        .await?;
+    sqlx::query("INSERT INTO web_sessions (token_hash, created_at, expires_at) VALUES (?, ?, ?)")
+        .bind(token_hash)
+        .bind(now)
+        .bind(expires_at)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn web_session_valid(pool: &SqlitePool, token_hash: &str) -> Result<bool> {
+    Ok(
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM web_sessions WHERE token_hash = ? AND expires_at > ?)")
+            .bind(token_hash)
+            .bind(now_ms())
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
+pub async fn delete_web_session(pool: &SqlitePool, token_hash: &str) -> Result<()> {
+    sqlx::query("DELETE FROM web_sessions WHERE token_hash = ?")
+        .bind(token_hash)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn get_stream(pool: &SqlitePool, id: i64) -> Result<Option<Stream>> {

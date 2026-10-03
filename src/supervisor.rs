@@ -21,6 +21,7 @@ use tracing::{info, warn};
 
 use crate::Ctx;
 use crate::db::{self, NewSegment, Stream};
+use crate::events::Event;
 use crate::pipeline::{self, OFFLINE_MARKERS};
 
 const LOG_ROTATE_BYTES: u64 = 5 << 20;
@@ -76,13 +77,13 @@ pub async fn run(ctx: Arc<Ctx>, stream: Stream, cancel: CancellationToken) {
             "pipeline ended after {:.0?}, next try in {delay:.0?}",
             started.elapsed()
         );
-        set_status(&ctx, stream.id, status, Some(&detail)).await;
+        ctx.set_status(stream.id, status, Some(&detail)).await;
         tokio::select! {
             _ = cancel.cancelled() => break,
             _ = sleep(delay) => {}
         }
     }
-    set_status(&ctx, stream.id, "stopped", None).await;
+    ctx.set_status(stream.id, "stopped", None).await;
     info!(stream = label, "recorder stopped");
 }
 
@@ -136,7 +137,7 @@ pub async fn attempt(ctx: &Ctx, stream: &Stream, cancel: &CancellationToken) -> 
     {
         warn!(stream = stream.label, "recording pipeline pids: {e:#}");
     }
-    set_status(ctx, stream.id, "recording", None).await;
+    ctx.set_status(stream.id, "recording", None).await;
 
     let mut indexer = Indexer {
         ctx,
@@ -298,7 +299,14 @@ impl Indexer<'_> {
             bytes,
         };
         match db::insert_segment(&self.ctx.pool, &row).await {
-            Ok(_) => {
+            Ok(segment_id) => {
+                self.ctx.emit(Event::SegmentAdded {
+                    stream_id: row.stream_id,
+                    segment_id,
+                    wall_start: row.wall_start,
+                    wall_end: row.wall_end,
+                    bytes: row.bytes,
+                });
                 self.count += 1;
                 self.last_wall_end = Some(wall_end);
             }
@@ -350,7 +358,11 @@ fn open_log(stream_dir: &Path, session_id: i64) -> Result<std::fs::File> {
     } else {
         std::fs::OpenOptions::new().create(true).append(true).open(&path)?
     };
-    writeln!(file, "\n=== session {session_id} at {} ===", db::now_ms())?;
+    writeln!(
+        file,
+        "\n=== session {session_id} at {} ===",
+        crate::units::format_utc(db::now_ms())
+    )?;
     Ok(file)
 }
 
@@ -360,10 +372,4 @@ fn rotate_log(stream_dir: &Path) -> Result<std::fs::File> {
     let path = stream_dir.join("capture.log");
     std::fs::rename(&path, stream_dir.join("capture.log.1"))?;
     Ok(std::fs::OpenOptions::new().create(true).append(true).open(&path)?)
-}
-
-async fn set_status(ctx: &Ctx, stream_id: i64, status: &str, detail: Option<&str>) {
-    if let Err(e) = db::set_status(&ctx.pool, stream_id, status, detail).await {
-        warn!("updating status of stream {stream_id}: {e:#}");
-    }
 }

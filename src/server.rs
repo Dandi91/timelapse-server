@@ -2,6 +2,7 @@
 //! database, and run retention in the background.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +14,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::db::{self, Stream};
-use crate::{Ctx, reconcile, retention, supervisor, web};
+use crate::events::Event;
+use crate::{Ctx, ToolVersions, reconcile, retention, supervisor, web};
 
 struct Recorder {
     revision: i64,
@@ -24,13 +26,16 @@ struct Recorder {
 /// Runs until `shutdown`. With a `listener`, also serves the web UI and API on it.
 pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<TcpListener>) -> Result<()> {
     reconcile::run(&ctx).await?;
-    tokio::spawn(log_tool_versions(ctx.clone()));
+    {
+        let ctx = ctx.clone();
+        tokio::spawn(async move { refresh_tool_versions(&ctx).await });
+    }
 
     let http = listener.map(|listener| {
         if let Ok(addr) = listener.local_addr() {
             info!("web UI on http://{addr}");
         }
-        let app = web::router(ctx.clone());
+        let app = web::router(ctx.clone(), shutdown.clone());
         let stop = shutdown.clone();
         tokio::spawn(async move {
             if let Err(e) = axum::serve(listener, app)
@@ -44,13 +49,24 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<
 
     let retention = tokio::spawn(retention_loop(ctx.clone(), shutdown.clone()));
     let mut recorders: HashMap<i64, Recorder> = HashMap::new();
+    let mut seen = None;
     loop {
         match db::list_streams(&ctx.pool).await {
-            Ok(streams) => sync(&ctx, &mut recorders, &streams),
+            Ok(streams) => {
+                // Changes arrive from the web UI and from the CLI alike; announce both the same way.
+                let configs = fingerprint(&streams);
+                if seen.as_ref().is_some_and(|seen| *seen != configs) {
+                    ctx.emit(Event::StreamsChanged);
+                }
+                seen = Some(configs);
+                sync(&ctx, &mut recorders, &streams);
+            }
             Err(e) => error!("reading streams: {e:#}"),
         }
+        // The web UI wakes us right after a change; the poll catches CLI changes.
         tokio::select! {
             _ = shutdown.cancelled() => break,
+            _ = ctx.wake.notified() => {}
             _ = sleep(ctx.tuning.poll_interval) => {}
         }
     }
@@ -100,12 +116,18 @@ fn sync(ctx: &Arc<Ctx>, recorders: &mut HashMap<i64, Recorder>, streams: &[Strea
         if recorders.contains_key(&stream.id) {
             continue;
         }
+        let (id, revision) = (stream.id, stream.revision);
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(supervisor::run(ctx.clone(), stream.clone(), cancel.clone()));
+        let (ctx, stream, token) = (ctx.clone(), stream.clone(), cancel.clone());
+        let handle = tokio::spawn(async move {
+            supervisor::run(ctx.clone(), stream, token).await;
+            // A changed stream restarts only once its old recorder is done; don't wait for a poll.
+            ctx.wake.notify_one();
+        });
         recorders.insert(
-            stream.id,
+            id,
             Recorder {
-                revision: stream.revision,
+                revision,
                 cancel,
                 handle,
             },
@@ -132,19 +154,39 @@ async fn retention_loop(ctx: Arc<Ctx>, shutdown: CancellationToken) {
     }
 }
 
-/// A stale yt-dlp is the usual cause of 403s on YouTube, so make its version visible. Runs in the
-/// background with a timeout: a hung tool must not hold up recording.
-async fn log_tool_versions(ctx: Arc<Ctx>) {
-    let tools = [(&ctx.tools.yt_dlp, "--version"), (&ctx.tools.ffmpeg, "-version")];
-    for (tool, flag) in tools {
-        let probe = tokio::process::Command::new(tool).arg(flag).kill_on_drop(true).output();
-        match tokio::time::timeout(Duration::from_secs(30), probe).await {
-            Ok(Ok(out)) => {
-                let text = String::from_utf8_lossy(&out.stdout);
-                info!("{}: {}", tool.display(), text.lines().next().unwrap_or("").trim());
-            }
-            Ok(Err(e)) => warn!("{} is not runnable: {e}", tool.display()),
-            Err(_) => warn!("{} {flag} did not answer within 30 s", tool.display()),
+/// The parts of the stream table the UI shows as configuration (statuses travel as their own
+/// events).
+fn fingerprint(streams: &[Stream]) -> Vec<(i64, i64, String)> {
+    streams
+        .iter()
+        .map(|s| (s.id, s.revision, format!("{:?}", s.config())))
+        .collect()
+}
+
+/// A stale yt-dlp is the usual cause of 403s on YouTube, so make its version visible, in the log and
+/// the UI. Bounded by a timeout: a hung tool must not hold anything up.
+pub async fn refresh_tool_versions(ctx: &Ctx) {
+    let yt_dlp = tool_version(&ctx.tools.yt_dlp, "--version").await;
+    let ffmpeg = tool_version(&ctx.tools.ffmpeg, "-version").await;
+    *ctx.versions.write().unwrap_or_else(|e| e.into_inner()) = ToolVersions { yt_dlp, ffmpeg };
+}
+
+async fn tool_version(tool: &Path, flag: &str) -> Option<String> {
+    let probe = tokio::process::Command::new(tool).arg(flag).kill_on_drop(true).output();
+    match tokio::time::timeout(Duration::from_secs(30), probe).await {
+        Ok(Ok(out)) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let version = text.lines().next().unwrap_or("").trim().to_string();
+            info!("{}: {version}", tool.display());
+            Some(version)
+        }
+        Ok(Err(e)) => {
+            warn!("{} is not runnable: {e}", tool.display());
+            None
+        }
+        Err(_) => {
+            warn!("{} {flag} did not answer within 30 s", tool.display());
+            None
         }
     }
 }

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timelapses · streams</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Timelapses</h1>
+  <nav><a href="./">Player</a><a href="manage.html" aria-current="page">Streams</a></nav>
+  <button id="logout" class="link" hidden>Log out</button>
+</header>
+
+<main>
+  <section class="system" aria-label="System">
+    <div>
+      <div id="disk-bar" class="disk-bar" title="Recordings / other files / free">
+        <div class="recordings"></div><div class="other"></div>
+      </div>
+      <div id="disk-text" class="muted"></div>
+    </div>
+    <div class="versions">
+      <span id="versions" class="muted"></span>
+      <button id="update-yt-dlp">Update yt-dlp</button>
+    </div>
+  </section>
+  <pre id="update-output" class="output" hidden></pre>
+
+  <div class="toolbar">
+    <h2>Streams</h2>
+    <button id="add" class="primary">Add stream</button>
+  </div>
+  <p id="message" class="error" role="alert"></p>
+  <div class="table-wrap">
+    <table id="streams">
+      <thead>
+        <tr><th>On</th><th>Stream</th><th>Status</th><th>Capture</th><th>Disk</th><th>Recorded</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p id="empty" class="muted" hidden>No streams yet.</p>
+</main>
+
+<dialog id="editor">
+  <form id="stream-form" method="dialog">
+    <h2 id="editor-title">Add stream</h2>
+    <label>URL <input name="url" type="url" required placeholder="https://www.youtube.com/watch?v=…"></label>
+    <label>Label <input name="label" required></label>
+    <fieldset>
+      <legend>Capture</legend>
+      <div class="grid">
+        <label>Frames kept / s <input name="sample_fps" type="number" step="any" min="0.01"></label>
+        <label>Stream fps <input name="source_fps" type="number" min="1"></label>
+        <label>Playback fps <input name="out_fps" type="number" min="1"></label>
+        <label>Height <input name="height" type="number" min="144" step="2"></label>
+        <label>Quality (CRF) <input name="crf" type="number" min="0" max="51"></label>
+        <label>Preset
+          <select name="preset">
+            <option>ultrafast</option><option>superfast</option><option>veryfast</option><option>faster</option>
+            <option>fast</option><option>medium</option><option>slow</option><option>slower</option><option>veryslow</option>
+          </select>
+        </label>
+        <label>Minutes / segment <input name="segment_minutes" type="number" step="any" min="0.1"></label>
+      </div>
+      <p id="speedup" class="muted"></p>
+    </fieldset>
+    <fieldset>
+      <legend>Keep at most</legend>
+      <div class="grid">
+        <label>Disk <input name="max_size" placeholder="e.g. 50G, empty = no limit"></label>
+        <label>Recorded time <input name="max_duration" placeholder="e.g. 7d, empty = no limit"></label>
+      </div>
+    </fieldset>
+    <label class="check"><input name="live_only" type="checkbox"> Only record while live (don't download ended streams)</label>
+    <label class="check"><input name="enabled" type="checkbox"> Recording enabled</label>
+    <p class="muted">Changing the URL or capture settings restarts the recorder.</p>
+    <p id="form-error" class="error" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="cancel">Cancel</button>
+      <button type="submit" class="primary" id="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="log-dialog" class="wide">
+  <h2 id="log-title">Log</h2>
+  <pre id="log" class="output"></pre>
+  <div class="actions">
+    <button type="button" id="log-refresh">Refresh</button>
+    <button type="button" id="log-close" class="primary">Close</button>
+  </div>
+</dialog>
+
+<script src="common.js"></script>
+<script src="manage.js"></script>
+</body>
+</html>

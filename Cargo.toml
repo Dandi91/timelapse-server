@@ -8,13 +8,17 @@ edition = "2024"
 anyhow = "1.0.104"
 axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive", "env"] }
+futures-util = "0.3.34"
+getrandom = "0.4.3"
 mime_guess = "2.0.5"
 nix = { version = "0.31.3", features = ["signal", "process", "fs"] }
 rust-embed = "8.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+sha2 = "0.11.0"
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros", "json"] }
 tokio = { version = "1.53.1", features = ["full"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-util = "0.7.19"
 tower-http = { version = "0.7.1", features = ["fs", "trace"] }
 tracing = "0.1.44"
@@ -22,5 +26,5 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
 
 [dev-dependencies]
-reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "stream"] }
 tempfile = "3.27.0"

@@ -5,6 +5,10 @@
   --line: #d2d2d7;
   --accent: #0a66c2;
   --footage: #7aa7d8;
+  --surface: #ffffff;
+  --error: #c4291c;
+  --ok: #1f7a3a;
+  --warn: #9a6200;
   color-scheme: light;
 }
 
@@ -16,6 +20,10 @@
     --line: #3a3a3e;
     --accent: #5aa0f2;
     --footage: #2f5f92;
+    --surface: #1f1f22;
+    --error: #ff7b6e;
+    --ok: #5cc27e;
+    --warn: #e2b04a;
     color-scheme: dark;
   }
 }
@@ -39,6 +47,77 @@ header {
 h1 {
   margin: 0;
   font-size: 18px;
+}
+
+h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+nav {
+  display: flex;
+  gap: 4px;
+}
+
+nav a {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+nav a[aria-current="page"] {
+  background: var(--line);
+}
+
+header .link {
+  margin-left: auto;
+}
+
+button.link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+button.primary {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+}
+
+button.danger {
+  color: var(--error);
+}
+
+.stream-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.ellipsis {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error {
+  color: var(--error);
+}
+
+.error:empty {
+  display: none;
 }
 
 main {
@@ -119,4 +198,192 @@ video {
   justify-content: space-between;
   font-size: 12px;
   margin-top: 4px;
+}
+
+/* --- streams page --- */
+
+.system {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px 24px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.system > div:first-child {
+  flex: 1 1 320px;
+}
+
+.versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.disk-bar {
+  display: flex;
+  height: 10px;
+  background: var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.disk-bar .recordings {
+  background: var(--accent);
+}
+
+.disk-bar .other {
+  background: var(--muted);
+  opacity: 0.5;
+}
+
+.output {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 16px 0 8px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+td a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: var(--line);
+}
+
+.badge.recording {
+  background: var(--ok);
+  color: #fff;
+}
+
+.badge.retrying {
+  background: var(--warn);
+  color: #fff;
+}
+
+.badge.offline,
+.badge.disabled,
+.badge.stopped {
+  color: var(--muted);
+}
+
+dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+dialog.wide {
+  width: min(1000px, calc(100vw - 32px));
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+dialog h2 {
+  margin-bottom: 12px;
+}
+
+form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+form label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+form input:not([type="checkbox"]),
+form select {
+  font: inherit;
+  padding: 5px 6px;
+}
+
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin: 0 0 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0 12px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* --- login --- */
+
+main.login {
+  max-width: 320px;
+  margin: 15vh auto 0;
+}
+
+main.login h1 {
+  margin-bottom: 16px;
 }

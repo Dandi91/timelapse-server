@@ -1,7 +1,6 @@
 // Plays a stream's timelapse through an HLS playlist built server-side, and maps the video's
 // position back to wall-clock time using the same segment list the playlist was built from.
 
-const $ = (selector) => document.querySelector(selector);
 const video = $('#video');
 
 // Only for Safari's native HLS, which doesn't say when it reloads the playlist.
@@ -12,25 +11,6 @@ const NATIVE_LIVE_REFRESH_MS = 10_000;
 let view = null;
 let hls = null;
 let liveTimer = null;
-
-async function api(path) {
-  const response = await fetch(path);
-  if (!response.ok) throw new Error(`${response.status} for ${path}`);
-  return response.json();
-}
-
-function formatTime(ms) {
-  return new Date(ms).toLocaleString(undefined, {
-    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
-}
-
-function formatBytes(bytes) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = 0;
-  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
-  return `${bytes.toFixed(i ? 1 : 0)} ${units[i]}`;
-}
 
 function message(text) {
   $('#message').textContent = text || '';
@@ -205,7 +185,7 @@ function currentStream() {
 }
 
 function describe(stream) {
-  const parts = [stream.enabled ? stream.status : 'disabled'];
+  const parts = [statusOf(stream)];
   if (stream.segments) {
     parts.push(`${stream.segments} segments, ${formatBytes(stream.bytes)}`);
     parts.push(`${formatTime(stream.first_wall)} – ${formatTime(stream.last_wall)}`);
@@ -262,6 +242,7 @@ $('#load-custom').addEventListener('click', async () => {
 });
 
 $('#stream').addEventListener('change', () => {
+  history.replaceState(null, '', `#stream=${$('#stream').value}`);
   $('#stream-info').textContent = describe(currentStream());
   showRange(document.querySelector('.ranges button[data-range="all"]'));
 });
@@ -284,9 +265,23 @@ async function init() {
   }
   const select = $('#stream');
   for (const stream of streams) select.append(new Option(stream.label, stream.id));
-  // Start on the first stream that has something to show.
-  select.value = String((streams.find((stream) => stream.segments) ?? streams[0]).id);
+  // The stream named in the link (#stream=3), else the first with something to show.
+  const wanted = new URLSearchParams(location.hash.slice(1)).get('stream');
+  const initial = streams.find((stream) => String(stream.id) === wanted)
+    ?? streams.find((stream) => stream.segments) ?? streams[0];
+  select.value = String(initial.id);
   select.dispatchEvent(new Event('change'));
 }
 
+/** Keep the status line current; stream list changes are picked up on the next page load. */
+function onEvent(event) {
+  if (event.type !== 'status') return;
+  const stream = streams.find((s) => s.id === event.stream_id);
+  if (!stream) return;
+  Object.assign(stream, { status: event.status, status_detail: event.detail });
+  if (stream === currentStream()) $('#stream-info').textContent = describe(stream);
+}
+
+setUpNav();
 init();
+subscribe(onEvent);

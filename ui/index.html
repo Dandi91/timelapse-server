@@ -9,9 +9,13 @@
 <body>
 <header>
   <h1>Timelapses</h1>
+  <nav><a href="./" aria-current="page">Player</a><a href="manage.html">Streams</a></nav>
+  <button id="logout" class="link" hidden>Log out</button>
+</header>
+<div class="stream-bar">
   <select id="stream" aria-label="Stream"></select>
   <span id="stream-info" class="muted"></span>
-</header>
+</div>
 
 <main>
   <div class="ranges">
@@ -52,6 +56,7 @@
 </main>
 
 <script src="vendor/hls.min.js"></script>
+<script src="common.js"></script>
 <script src="player.js"></script>
 </body>
 </html>

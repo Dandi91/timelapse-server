@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timelapses · log in</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="login">
+  <h1>Timelapses</h1>
+  <form id="login">
+    <label>Password
+      <input type="password" id="password" autocomplete="current-password" required autofocus>
+    </label>
+    <button type="submit">Log in</button>
+    <p id="error" class="error" role="alert"></p>
+  </form>
+</main>
+<script>
+  document.querySelector('#login').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const error = document.querySelector('#error');
+    const button = event.target.querySelector('button');
+    error.textContent = '';
+    button.disabled = true;
+    try {
+      const response = await fetch('api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: document.querySelector('#password').value }),
+      });
+      if (response.ok) {
+        location.href = './';
+        return;
+      }
+      error.textContent = response.status === 401 ? 'Wrong password.' : `Login failed (${response.status}).`;
+    } catch {
+      error.textContent = 'The server is not reachable.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

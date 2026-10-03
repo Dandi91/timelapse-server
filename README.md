@@ -7,12 +7,17 @@ Each stream runs `yt-dlp -o - | ffmpeg`. ffmpeg keeps every Nth frame, re-times 
 writes MPEG-TS segments. It reports each finished segment on stdout, and the server records it in
 the database. If a pipeline drops, it restarts with backoff in a new session.
 
-`serve` also serves a web player on `--bind` (default `127.0.0.1:8080`). You choose a stream and a
-time range, and it plays the timelapse with a wall-clock readout. A coverage bar shows where
-footage exists; clicking it jumps to that time. A live mode follows new segments as they finish.
-Managing streams from the browser and exporting clips are still to come; for now that's the CLI.
+`serve` also serves a web UI on `--bind` (default `127.0.0.1:8080`):
 
-There is no authentication yet. Keep the port on localhost or a trusted network.
+- **Player.** Choose a stream and a time range, and it plays the timelapse with a wall-clock
+  readout. A coverage bar shows where footage exists; clicking it jumps to that time. A live
+  mode follows new segments as they finish.
+- **Streams.** Add, edit, enable, restart and delete streams; status updates live. You can read
+  each stream's capture log, see disk usage and tool versions, and update yt-dlp.
+
+Set `TIMELAPSE_PASSWORD` to require a login. Without it, anyone who can reach the port can manage
+streams, and the server warns when it listens beyond localhost. Logins last 30 days and survive
+restarts.
 
 ## Usage
 
@@ -52,12 +57,25 @@ Global options are also available as environment variables:
 | `--ffmpeg` | `TIMELAPSE_FFMPEG` | `ffmpeg` |
 | `--ffprobe` | `TIMELAPSE_FFPROBE` | `ffprobe` |
 | `--min-free` (serve only) | `TIMELAPSE_MIN_FREE` | 5G; below this, the oldest segments across all streams are pruned |
+| `--bind` (serve only) | `TIMELAPSE_BIND` | `127.0.0.1:8080` (`0.0.0.0:8080` in the Docker image) |
+| `--password` (serve only) | `TIMELAPSE_PASSWORD` | none: no login |
 
 ### HTTP API
+
+Once a password is set, everything except the login page needs the session cookie from
+`POST /api/login`.
 
 | Endpoint | Returns |
 |---|---|
 | `GET /api/streams` | streams with status, settings, and footage totals |
+| `POST /api/streams` | create: `{label, url, settings?, max_bytes?, max_duration_secs?, live_only?, enabled?}` |
+| `PATCH /api/streams/{id}` | change any of those fields; `settings` may be partial, and a limit set to `null` is removed |
+| `DELETE /api/streams/{id}` | remove the stream and its recordings |
+| `POST /api/streams/{id}/restart` | restart its pipeline |
+| `GET /api/streams/{id}/log?lines=` | the end of its capture log |
+| `GET /api/system` | disk usage, the free-space minimum, tool versions |
+| `POST /api/system/update-yt-dlp` | run `yt-dlp -U` |
+| `GET /api/events` | server-sent events: status changes, segments added and removed, stream changes |
 | `GET /api/streams/{id}/segments?from=&to=` | segments overlapping a wall-clock range (unix ms, either end optional) |
 | `GET /streams/{id}/playlist.m3u8?from=&to=` | HLS VOD playlist for the range; sessions are separated by discontinuities |
 | `GET /streams/{id}/playlist.m3u8?live=1&from=` | growing HLS EVENT playlist |
@@ -85,7 +103,8 @@ current.
 ```sh
 docker pull ghcr.io/dandi91/timelapse-server:latest
 docker run -d --name timelapse --restart unless-stopped --stop-timeout 120 \
-    -p 8080:8080 -v /srv/timelapse:/data ghcr.io/dandi91/timelapse-server:latest
+    -p 8080:8080 -e TIMELAPSE_PASSWORD='choose-one' \
+    -v /srv/timelapse:/data ghcr.io/dandi91/timelapse-server:latest
 docker exec timelapse timelapse-server add 'https://www.youtube.com/watch?v=...' --label cam1
 docker exec timelapse timelapse-server list
 ```

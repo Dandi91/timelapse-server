@@ -48,6 +48,31 @@ pub fn format_duration(secs: i64) -> String {
     }
 }
 
+/// `2026-10-03 10:47:46Z`, without pulling in a date crate.
+pub fn format_utc(ms: i64) -> String {
+    let secs = ms / 1000;
+    let (d, rem) = (secs / 86400, secs % 86400);
+    let (y, m, dd) = civil_from_days(d);
+    format!(
+        "{y:04}-{m:02}-{dd:02} {:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
 fn split(text: &str) -> (&str, &str) {
     let text = text.trim();
     let at = text
@@ -86,5 +111,6 @@ mod tests {
         assert!(parse_duration_secs("h").is_err());
         assert_eq!(format_duration(90 * 60), "1h30m");
         assert_eq!(format_duration(26 * 3600), "1d02h");
+        assert_eq!(format_utc(1_791_024_466_000), "2026-10-03 10:47:46Z");
     }
 }

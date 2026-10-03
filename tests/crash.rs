@@ -46,7 +46,7 @@ async fn restart_adopts_the_segment_a_crash_left_in_flight() {
     .status()
     .unwrap();
     assert!(added.success());
-    let mut server = run(&["serve"]).spawn().unwrap();
+    let mut server = run(&["serve", "--bind", "127.0.0.1:0"]).spawn().unwrap();
 
     let pool = f.ctx.pool.clone();
     let started = wait_for(Duration::from_secs(15), || async {

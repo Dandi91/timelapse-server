@@ -1,4 +1,5 @@
 pub mod db;
+pub mod events;
 pub mod pipeline;
 pub mod procs;
 pub mod reconcile;
@@ -10,10 +11,13 @@ pub mod units;
 pub mod web;
 
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
+use tokio::sync::{Notify, broadcast};
 
+use crate::events::Event;
 use crate::pipeline::Tools;
 
 /// Timings for the background loops. Tests shrink these.
@@ -46,15 +50,60 @@ impl Default for Tuning {
     }
 }
 
-/// Everything the background tasks share.
+/// First line of `--version` output, once known.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ToolVersions {
+    pub yt_dlp: Option<String>,
+    pub ffmpeg: Option<String>,
+}
+
+/// Everything the background tasks and the web server share.
 pub struct Ctx {
     pub pool: SqlitePool,
     pub data_dir: PathBuf,
     pub tools: Tools,
     pub tuning: Tuning,
+    /// SHA-256 of the web password; `None` leaves the web UI open.
+    pub password_hash: Option<[u8; 32]>,
+    /// Live events for connected browsers.
+    pub events: broadcast::Sender<Event>,
+    /// Wakes the recorder manager to reread the stream table now rather than at the next poll.
+    pub wake: Notify,
+    pub versions: RwLock<ToolVersions>,
 }
 
 impl Ctx {
+    pub fn new(pool: SqlitePool, data_dir: PathBuf, tools: Tools, tuning: Tuning) -> Self {
+        Self {
+            pool,
+            data_dir,
+            tools,
+            tuning,
+            password_hash: None,
+            events: broadcast::channel(256).0,
+            wake: Notify::new(),
+            versions: RwLock::default(),
+        }
+    }
+
+    /// Send an event to whoever is listening; nobody listening is fine.
+    pub fn emit(&self, event: Event) {
+        let _ = self.events.send(event);
+    }
+
+    /// Record a stream's status and tell the browsers.
+    pub async fn set_status(&self, stream_id: i64, status: &str, detail: Option<&str>) {
+        if let Err(e) = db::set_status(&self.pool, stream_id, status, detail).await {
+            tracing::warn!("updating status of stream {stream_id}: {e:#}");
+        }
+        self.emit(Event::Status {
+            stream_id,
+            status: status.into(),
+            detail: detail.map(Into::into),
+            at: db::now_ms(),
+        });
+    }
+
     pub fn streams_dir(&self) -> PathBuf {
         self.data_dir.join("streams")
     }

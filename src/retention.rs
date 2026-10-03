@@ -9,6 +9,7 @@ use tracing::{info, warn};
 
 use crate::Ctx;
 use crate::db::{self, PruneCandidate};
+use crate::events::Event;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct PruneReport {
@@ -115,7 +116,9 @@ pub async fn delete_segments(ctx: &Ctx, ids: &[i64]) -> Result<()> {
             dirs.insert(dir.to_path_buf());
         }
     }
-    db::delete_segment_rows(&ctx.pool, &doomed.iter().map(|s| s.id).collect::<Vec<_>>()).await?;
+    let ids: Vec<i64> = doomed.iter().map(|s| s.id).collect();
+    db::delete_segment_rows(&ctx.pool, &ids).await?;
+    ctx.emit(Event::SegmentsRemoved { ids });
     for dir in dirs {
         // Fails harmlessly while the directory still holds segments.
         let _ = std::fs::remove_dir(dir);
@@ -124,8 +127,14 @@ pub async fn delete_segments(ctx: &Ctx, ids: &[i64]) -> Result<()> {
 }
 
 pub fn free_bytes(path: &Path) -> Result<u64> {
+    Ok(disk_space(path)?.0)
+}
+
+/// Free (to unprivileged users) and total bytes of the filesystem holding `path`.
+pub fn disk_space(path: &Path) -> Result<(u64, u64)> {
     let stat = nix::sys::statvfs::statvfs(path)?;
-    Ok(stat.blocks_available() as u64 * stat.fragment_size() as u64)
+    let block = stat.fragment_size() as u64;
+    Ok((stat.blocks_available() as u64 * block, stat.blocks() as u64 * block))
 }
 
 #[cfg(test)]

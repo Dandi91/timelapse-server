@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand};
 use timelapse_server::db::{self, StreamConfig};
 use timelapse_server::pipeline::Tools;
 use timelapse_server::settings::EncodeSettings;
-use timelapse_server::units::{format_duration, format_size, parse_duration_secs, parse_size};
+use timelapse_server::units::{format_duration, format_size, format_utc, parse_duration_secs, parse_size};
 use timelapse_server::{Ctx, Tuning, server};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -33,10 +33,12 @@ struct Cli {
 enum Command {
     /// Record every enabled stream until stopped; picks up stream changes as they happen.
     Serve {
-        /// Address for the web UI and API. There is no authentication yet: keep it on localhost or
-        /// a trusted network.
+        /// Address for the web UI and API.
         #[arg(long, env = "TIMELAPSE_BIND", default_value = "127.0.0.1:8080")]
         bind: String,
+        /// Password for the web UI. Without one, anyone who can reach `--bind` can manage streams.
+        #[arg(long, env = "TIMELAPSE_PASSWORD", hide_env_values = true)]
+        password: Option<String>,
         /// Prune the oldest segments across all streams when free space drops below this.
         #[arg(long, env = "TIMELAPSE_MIN_FREE", default_value = "5G", value_parser = parse_size)]
         min_free: i64,
@@ -170,7 +172,11 @@ async fn main() -> Result<()> {
     let pool = db::connect(&data_dir.join("timelapse.db")).await?;
 
     match cli.command {
-        Command::Serve { bind, min_free } => {
+        Command::Serve {
+            bind,
+            password,
+            min_free,
+        } => {
             let listener = tokio::net::TcpListener::bind(&bind)
                 .await
                 .with_context(|| format!("listening on {bind}"))?;
@@ -183,12 +189,16 @@ async fn main() -> Result<()> {
                 min_free_bytes: min_free as u64,
                 ..Tuning::default()
             };
-            let ctx = Arc::new(Ctx {
-                pool: pool.clone(),
-                data_dir,
-                tools,
-                tuning,
-            });
+            let mut ctx = Ctx::new(pool.clone(), data_dir, tools, tuning);
+            let password = password.filter(|p| !p.is_empty());
+            ctx.password_hash = password.as_deref().map(timelapse_server::web::auth::hash);
+            if password.is_none() && !listener.local_addr()?.ip().is_loopback() {
+                tracing::warn!(
+                    "the web UI on {bind} has no password; anyone who can reach it can manage streams \
+                     (set TIMELAPSE_PASSWORD)"
+                );
+            }
+            let ctx = Arc::new(ctx);
             let shutdown = CancellationToken::new();
             tokio::spawn(stop_on_signal(shutdown.clone()));
             server::serve(ctx, shutdown, Some(listener)).await?;
@@ -239,8 +249,8 @@ async fn main() -> Result<()> {
                 println!(
                     "{:>6} {}  {}  {:>7.1}s  {:>8}  {}",
                     seg.session_id,
-                    fmt_time(seg.wall_start),
-                    fmt_time(seg.wall_end),
+                    format_utc(seg.wall_start),
+                    format_utc(seg.wall_end),
                     seg.media_dur,
                     format_size(seg.bytes),
                     seg.path
@@ -291,31 +301,6 @@ async fn list(pool: &sqlx::SqlitePool) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn fmt_time(ms: i64) -> String {
-    let secs = ms / 1000;
-    let (d, rem) = (secs / 86400, secs % 86400);
-    // Without pulling in a date crate: days since epoch converted to a civil date.
-    let (y, m, dd) = civil_from_days(d);
-    format!(
-        "{y:04}-{m:02}-{dd:02} {:02}:{:02}:{:02}Z",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
-}
-
-fn civil_from_days(z: i64) -> (i64, i64, i64) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
 async fn stop_on_signal(shutdown: CancellationToken) {

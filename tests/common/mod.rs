@@ -44,6 +44,15 @@ pub fn pattern_source(seconds: u32, realtime: bool) -> String {
 }
 
 pub async fn fixture(fetcher_script: &str) -> Fixture {
+    let (ctx, dir) = fixture_ctx(fetcher_script).await;
+    Fixture {
+        ctx: Arc::new(ctx),
+        dir,
+    }
+}
+
+/// The context before it is shared, for tests that adjust it.
+pub async fn fixture_ctx(fetcher_script: &str) -> (Ctx, TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let data_dir = dir.path().join("data");
     std::fs::create_dir_all(&data_dir).unwrap();
@@ -63,15 +72,7 @@ pub async fn fixture(fetcher_script: &str) -> Fixture {
         retention_interval: Duration::from_millis(500),
         min_free_bytes: 0,
     };
-    Fixture {
-        ctx: Arc::new(Ctx {
-            pool,
-            data_dir,
-            tools,
-            tuning,
-        }),
-        dir,
-    }
+    (Ctx::new(pool, data_dir, tools, tuning), dir)
 }
 
 pub fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
