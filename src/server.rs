@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 
 use crate::db::{self, Stream};
 use crate::events::Event;
-use crate::{Ctx, ToolVersions, exports, reconcile, retention, supervisor, web};
+use crate::{Ctx, ToolVersions, exports, reconcile, retention, supervisor, thumbs, web};
 
 struct Recorder {
     revision: i64,
@@ -50,6 +50,7 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<
 
     let retention = tokio::spawn(retention_loop(ctx.clone(), shutdown.clone()));
     let exporter = tokio::spawn(exports::worker(ctx.clone(), shutdown.clone()));
+    let thumbnailer = tokio::spawn(thumbs::worker(ctx.clone(), shutdown.clone()));
     let mut recorders: HashMap<i64, Recorder> = HashMap::new();
     let mut seen = None;
     loop {
@@ -82,6 +83,7 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<
     }
     let _ = retention.await;
     let _ = exporter.await;
+    let _ = thumbnailer.await;
     if let Some(http) = http {
         let _ = http.await;
     }

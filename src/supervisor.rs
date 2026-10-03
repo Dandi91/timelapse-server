@@ -307,6 +307,7 @@ impl Indexer<'_> {
                     wall_end: row.wall_end,
                     bytes: row.bytes,
                 });
+                self.ctx.thumbs_wake.notify_one();
                 self.count += 1;
                 self.last_wall_end = Some(wall_end);
             }

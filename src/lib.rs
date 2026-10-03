@@ -8,6 +8,7 @@ pub mod retention;
 pub mod server;
 pub mod settings;
 pub mod supervisor;
+pub mod thumbs;
 pub mod units;
 pub mod web;
 
@@ -72,6 +73,8 @@ pub struct Ctx {
     pub wake: Notify,
     pub versions: RwLock<ToolVersions>,
     pub exports: exports::Control,
+    /// Wakes the thumbnail worker when a segment is finished.
+    pub thumbs_wake: Notify,
 }
 
 impl Ctx {
@@ -86,6 +89,7 @@ impl Ctx {
             wake: Notify::new(),
             versions: RwLock::default(),
             exports: exports::Control::default(),
+            thumbs_wake: Notify::new(),
         }
     }
 

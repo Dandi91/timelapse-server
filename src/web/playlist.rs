@@ -70,6 +70,8 @@ mod tests {
             media_dur,
             bytes: 0,
             state: "ready".into(),
+            thumbs: None,
+            thumb_interval: None,
         }
     }
 

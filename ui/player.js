@@ -7,10 +7,12 @@ const video = $('#video');
 const NATIVE_LIVE_REFRESH_MS = 10_000;
 
 // What is loaded now: the stream, its segments in playback order, and where each one starts in
-// the video (seconds). `from`/`to` are the wall-clock window shown on the bar.
+// the video (seconds). `from`/`to` are the wall-clock window shown on the timeline.
 let view = null;
 let hls = null;
 let liveTimer = null;
+// While live: extends the timeline to now, so the stretch being recorded grows.
+let liveClock = null;
 
 function message(text) {
   $('#message').textContent = text || '';
@@ -47,62 +49,78 @@ function timeAt(ms) {
   return offsets[i] + fraction * segment.media_dur;
 }
 
-// --- coverage bar ------------------------------------------------------------------------------
+// --- timeline ----------------------------------------------------------------------------------
 
-function drawBar() {
-  const bar = $('#bar');
-  bar.querySelectorAll('.span').forEach((el) => el.remove());
-  const { segments, from, to } = view;
-  const width = to - from;
-  // One span per session: within a session, footage is continuous.
-  let start = null;
-  segments.forEach((segment, i) => {
-    start ??= segment.wall_start;
-    const next = segments[i + 1];
-    if (!next || next.session_id !== segment.session_id) {
-      const span = document.createElement('div');
-      span.className = 'span';
-      span.style.left = `${((start - from) / width) * 100}%`;
-      span.style.width = `${Math.max(((segment.wall_end - start) / width) * 100, 0.2)}%`;
-      bar.append(span);
-      start = null;
-    }
+/** A segment's thumbnail sprite, next to it under the stream's playlist directory. */
+function thumbUrl(segment) {
+  const relative = segment.path.replace(/^streams\/\d+\//, '').replace(/\.ts$/, '.jpg');
+  return `streams/${segment.stream_id}/${relative}`;
+}
+
+const timeline = new Timeline($('#timeline'), {
+  thumbUrl,
+  onSeek(ms) {
+    if (!view) return;
+    video.currentTime = timeAt(ms);
+    video.play().catch(() => {});
+  },
+  onSelect(from, to) {
+    $('#export-from').value = toLocalInput(from, true);
+    $('#export-to').value = toLocalInput(to, true);
+    drawSelection();
+  },
+});
+
+function drawTimeline() {
+  if (!view) return;
+  const newest = view.segments[view.segments.length - 1].wall_end;
+  timeline.setData({
+    segments: view.segments,
+    from: view.from,
+    to: view.to,
+    recordingFrom: view.live ? newest : null,
   });
-  $('#bar-start').textContent = formatTime(from);
-  $('#bar-end').textContent = formatTime(to);
   drawSelection();
 }
 
-/** The export range from the form, drawn over the bar. */
+/** The export range from the form, shown on the timeline. */
 function drawSelection() {
-  const box = $('#selection');
   const from = Date.parse($('#export-from').value);
   const to = Date.parse($('#export-to').value);
-  if (!view || Number.isNaN(from) || Number.isNaN(to) || to <= from) {
-    box.hidden = true;
-    return;
-  }
-  const width = view.to - view.from;
-  const left = Math.max((from - view.from) / width, 0);
-  const right = Math.min((to - view.from) / width, 1);
-  box.hidden = right <= left;
-  box.style.left = `${left * 100}%`;
-  box.style.width = `${(right - left) * 100}%`;
+  timeline.setSelection(Number.isNaN(from) ? null : from, Number.isNaN(to) ? null : to);
 }
+
+$('#zoom-in').addEventListener('click', () => timeline.zoom(1 / 2));
+$('#zoom-out').addEventListener('click', () => timeline.zoom(2));
+$('#zoom-fit').addEventListener('click', () => timeline.fit());
 
 function updateClock() {
   if (!view) return;
   const wall = wallAt(video.currentTime);
   $('#clock').textContent = formatTime(wall);
-  const position = (wall - view.from) / (view.to - view.from);
-  $('#cursor').style.left = `${Math.min(Math.max(position, 0), 1) * 100}%`;
+  timeline.setCursor(wall);
+  updateLive(wall);
 }
 
-$('#bar').addEventListener('click', (event) => {
+/** In live mode: how far behind real time the picture is, and a way back to the newest footage. */
+function updateLive(wall) {
+  const badge = $('#live');
+  badge.hidden = !view?.live;
+  if (!view?.live) {
+    $('#jump-live').hidden = true;
+    return;
+  }
+  const newest = view.segments[view.segments.length - 1].wall_end;
+  const behind = Math.max(Date.now() - wall, 0) / 1000;
+  $('#live-lag').textContent = behind < 90 ? `${Math.round(behind)} s behind` : `${formatDuration(behind)} behind`;
+  // The newest footage itself trails by up to a segment; only offer a jump when well behind that.
+  $('#jump-live').hidden = newest - wall < 2 * MINUTE_MS;
+}
+
+$('#jump-live').addEventListener('click', () => {
   if (!view) return;
-  const box = event.currentTarget.getBoundingClientRect();
-  const wall = view.from + ((event.clientX - box.left) / box.width) * (view.to - view.from);
-  video.currentTime = timeAt(wall);
+  const total = view.offsets[view.offsets.length - 1] + view.segments[view.segments.length - 1].media_dur;
+  video.currentTime = Math.max(total - 3, 0);
   video.play().catch(() => {});
 });
 
@@ -137,6 +155,7 @@ function attach(url, startPosition, onPlaylist) {
 /** Load `stream` for a wall-clock window; `live` follows new segments as they finish. */
 async function open(stream, { from = null, to = null, live = false } = {}) {
   clearInterval(liveTimer);
+  clearInterval(liveClock);
   message('');
   const query = new URLSearchParams();
   if (from != null) query.set('from', Math.round(from));
@@ -149,6 +168,8 @@ async function open(stream, { from = null, to = null, live = false } = {}) {
     video.removeAttribute('src');
     video.load();
     $('#clock').textContent = '–';
+    timeline.setData({ segments: [], from: from ?? Date.now() - 60 * MINUTE_MS, to: to ?? Date.now() });
+    updateLive(0);
     message(live ? 'Nothing recorded yet; a segment appears once it is finished.' : 'No footage in this range.');
     return;
   }
@@ -157,11 +178,19 @@ async function open(stream, { from = null, to = null, live = false } = {}) {
     stream,
     segments,
     offsets: offsetsOf(segments),
-    from: from ?? segments[0].wall_start,
+    // Live shows from the footage on, not an empty stretch before a stream that just started.
+    from: live ? Math.max(from, segments[0].wall_start) : (from ?? segments[0].wall_start),
     to: live ? Date.now() : (to ?? segments[segments.length - 1].wall_end),
     live,
   };
-  drawBar();
+  drawTimeline();
+  if (live) {
+    liveClock = setInterval(() => {
+      view.to = Date.now();
+      drawTimeline();
+      updateClock();
+    }, 5000);
+  }
   const total = view.offsets[segments.length - 1] + segments[segments.length - 1].media_dur;
   // Live starts a few seconds before the newest footage; anything else from the start.
   // The page's segment list must cover everything the player can reach, or the wall clock would
@@ -193,7 +222,7 @@ async function refreshSegments(stream, from) {
   view.segments = segments;
   view.offsets = offsetsOf(segments);
   view.to = Date.now();
-  drawBar();
+  drawTimeline();
 }
 
 // --- controls ----------------------------------------------------------------------------------
@@ -237,9 +266,6 @@ async function showRange(button) {
     if (view) {
       $('#from').value = toLocalInput(view.from);
       $('#to').value = toLocalInput(view.to);
-      $('#export-from').value = toLocalInput(view.from, true);
-      $('#export-to').value = toLocalInput(view.to, true);
-      drawSelection();
     }
   } catch (error) {
     message(String(error));
@@ -325,7 +351,7 @@ $('#export').addEventListener('click', async () => {
   const from = Date.parse($('#export-from').value);
   const to = Date.parse($('#export-to').value);
   if (!stream || Number.isNaN(from) || Number.isNaN(to)) {
-    note.textContent = 'Pick a start and an end first.';
+    note.textContent = 'Pick a start and an end first: shift-drag on the timeline, or use the buttons.';
     return;
   }
   const mode = document.querySelector('input[name="export-mode"]:checked').value;

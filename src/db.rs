@@ -320,6 +320,8 @@ pub struct Segment {
     pub media_dur: f64,
     pub bytes: i64,
     pub state: String,
+    pub thumbs: Option<i64>,
+    pub thumb_interval: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -359,7 +361,7 @@ pub async fn insert_segment(pool: &SqlitePool, s: &NewSegment) -> Result<i64> {
 pub async fn list_segments(pool: &SqlitePool, stream_id: i64) -> Result<Vec<Segment>> {
     Ok(sqlx::query_as(
         "SELECT id, session_id, stream_id, seq, path, wall_start, wall_end, media_start, media_end, media_dur, \
-         bytes, state FROM segments WHERE stream_id = ? ORDER BY wall_start, id",
+         bytes, state, thumbs, thumb_interval FROM segments WHERE stream_id = ? ORDER BY wall_start, id",
     )
     .bind(stream_id)
     .fetch_all(pool)
@@ -385,7 +387,7 @@ pub async fn segments_in_range(
 ) -> Result<Vec<Segment>> {
     Ok(sqlx::query_as(
         "SELECT id, session_id, stream_id, seq, path, wall_start, wall_end, media_start, media_end, media_dur, \
-         bytes, state FROM segments WHERE stream_id = ? AND state = 'ready' AND wall_end > ? AND wall_start < ? \
+         bytes, state, thumbs, thumb_interval FROM segments WHERE stream_id = ? AND state = 'ready' AND wall_end > ? AND wall_start < ? \
          ORDER BY session_id, seq",
     )
     .bind(stream_id)
@@ -483,7 +485,7 @@ pub async fn get_stream(pool: &SqlitePool, id: i64) -> Result<Option<Stream>> {
 pub async fn all_segments(pool: &SqlitePool) -> Result<Vec<Segment>> {
     Ok(sqlx::query_as(
         "SELECT id, session_id, stream_id, seq, path, wall_start, wall_end, media_start, media_end, media_dur, \
-         bytes, state FROM segments ORDER BY wall_start, id",
+         bytes, state, thumbs, thumb_interval FROM segments ORDER BY wall_start, id",
     )
     .fetch_all(pool)
     .await?)
@@ -575,6 +577,15 @@ pub async fn delete_segment_rows(pool: &SqlitePool, ids: &[i64]) -> Result<()> {
 
 pub async fn lease_segment(pool: &SqlitePool, segment_id: i64, holder: &str) -> Result<()> {
     sqlx::query("INSERT OR IGNORE INTO segment_leases (segment_id, holder) VALUES (?, ?)")
+        .bind(segment_id)
+        .bind(holder)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn release_lease(pool: &SqlitePool, segment_id: i64, holder: &str) -> Result<()> {
+    sqlx::query("DELETE FROM segment_leases WHERE segment_id = ? AND holder = ?")
         .bind(segment_id)
         .bind(holder)
         .execute(pool)
@@ -801,4 +812,32 @@ pub async fn count_segments_in_range(pool: &SqlitePool, stream_id: i64, from: i6
     .bind(to)
     .fetch_one(pool)
     .await?)
+}
+
+/// A segment still waiting for its thumbnails, newest first, with its keyframe spacing.
+#[derive(Debug, Clone, FromRow)]
+pub struct Unthumbed {
+    pub id: i64,
+    pub path: String,
+    pub media_dur: f64,
+    pub settings: Json<EncodeSettings>,
+}
+
+pub async fn next_unthumbed(pool: &SqlitePool) -> Result<Option<Unthumbed>> {
+    Ok(sqlx::query_as(
+        "SELECT s.id, s.path, s.media_dur, ss.settings FROM segments s JOIN sessions ss ON ss.id = s.session_id \
+         WHERE s.state = 'ready' AND s.thumbs IS NULL ORDER BY s.wall_start DESC, s.id DESC LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub async fn set_thumbs(pool: &SqlitePool, id: i64, thumbs: i64, interval: f64) -> Result<()> {
+    sqlx::query("UPDATE segments SET thumbs = ?, thumb_interval = ? WHERE id = ?")
+        .bind(thumbs)
+        .bind(interval)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }

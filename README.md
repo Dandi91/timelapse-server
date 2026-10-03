@@ -10,8 +10,10 @@ the database. If a pipeline drops, it restarts with backoff in a new session.
 `serve` also serves a web UI on `--bind` (default `127.0.0.1:8080`):
 
 - **Player.** Choose a stream and a time range, and it plays the timelapse with a wall-clock
-  readout. A coverage bar shows where footage exists; clicking it jumps to that time. A live
-  mode follows new segments as they finish.
+  readout. The timeline under it shows footage and gaps in clock time. You can scroll to zoom,
+  drag to pan, click to jump, and shift-drag to select a clip. Hovering shows the time and a
+  thumbnail. Live mode follows new segments as they finish; it shows how far behind real time the
+  picture is, and the stretch still being recorded.
 - **Exports.** Pick a range under the player (or mark it from the playback position) and export it
   as an mp4. Fast mode copies the video, so it takes seconds, and starts at the keyframe before
   the requested time. Exact mode re-encodes and cuts to the frame. A range that spans different
@@ -97,6 +99,7 @@ Once a password is set, everything except the login page needs the session cooki
 data/timelapse.db                         streams, sessions, segments
 data/streams/<stream>/capture.log         yt-dlp and ffmpeg messages (rotated at 5 MB)
 data/streams/<stream>/<session>/000000.ts segments
+data/streams/<stream>/<session>/000000.jpg keyframe thumbnails of that segment, one tile per keyframe
 data/exports/<id>.mp4                     finished exports
 ```
 

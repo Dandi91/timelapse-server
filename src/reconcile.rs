@@ -101,11 +101,11 @@ async fn adopt_untracked(
     known: &HashSet<String>,
     report: &mut ReconcileReport,
 ) -> Result<()> {
-    let mut files: Vec<_> = std::fs::read_dir(dir)?
+    let (sprites, mut files): (Vec<_>, Vec<_>) = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.is_file() && !known.contains(&ctx.relative(p)))
-        .collect();
+        .partition(|p| p.extension().is_some_and(|ext| ext == "jpg"));
     files.sort();
     // Like live indexing, never let an adopted segment overlap the one before it.
     let mut previous_end = db::session_last_wall_end(&ctx.pool, session.id).await?;
@@ -147,6 +147,12 @@ async fn adopt_untracked(
         db::insert_segment(&ctx.pool, &row).await?;
         previous_end = Some(wall_end);
         report.adopted += 1;
+    }
+    // Thumbnails stay with a segment that is still there (an adopted one gets them remade).
+    for sprite in sprites {
+        if !sprite.with_extension("ts").exists() {
+            remove(&sprite, report);
+        }
     }
     Ok(())
 }

@@ -7,9 +7,9 @@ use std::path::Path;
 use anyhow::Result;
 use tracing::{info, warn};
 
-use crate::Ctx;
 use crate::db::{self, PruneCandidate};
 use crate::events::Event;
+use crate::{Ctx, thumbs};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct PruneReport {
@@ -104,10 +104,12 @@ pub async fn delete_segments(ctx: &Ctx, ids: &[i64]) -> Result<()> {
     let mut dirs = HashSet::new();
     for seg in &doomed {
         let path = ctx.absolute(&seg.path);
-        match std::fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => warn!("deleting {}: {e}", path.display()),
+        for file in [path.clone(), thumbs::sprite_path(&path)] {
+            match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => warn!("deleting {}: {e}", file.display()),
+            }
         }
         // Never remove a live session's directory: ffmpeg is still writing into it.
         if seg.session_ended

@@ -166,39 +166,6 @@ video {
   font-variant-numeric: tabular-nums;
 }
 
-#bar {
-  position: relative;
-  height: 28px;
-  background: var(--line);
-  border-radius: 4px;
-  overflow: hidden;
-  cursor: pointer;
-}
-
-#bar .span {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: var(--footage);
-  pointer-events: none;
-}
-
-#cursor {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--accent);
-  pointer-events: none;
-  z-index: 2;
-}
-
-.bar-labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-top: 4px;
-}
 
 /* --- streams page --- */
 
@@ -390,20 +357,6 @@ main.login h1 {
 
 /* --- exports --- */
 
-/* Above the footage spans, below the cursor. */
-#selection {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 1;
-  box-sizing: border-box;
-  min-width: 4px;
-  background: rgb(0 0 0 / 22%);
-  border-left: 2px solid var(--accent);
-  border-right: 2px solid var(--accent);
-  pointer-events: none;
-}
-
 .export {
   margin-top: 24px;
   padding-top: 12px;
@@ -465,4 +418,83 @@ a.button {
 
 tr.highlight {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* --- timeline --- */
+
+.timeline {
+  position: relative;
+  height: 44px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+
+.timeline canvas {
+  display: block;
+  border-radius: 4px;
+}
+
+.tl-hover {
+  position: absolute;
+  bottom: 48px;
+  z-index: 3;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
+  pointer-events: none;
+}
+
+.tl-thumb {
+  width: 160px;
+  height: 90px;
+  background-color: #000;
+  background-repeat: no-repeat;
+  border-radius: 3px;
+}
+
+.tl-time {
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-top: 4px;
+}
+
+.timeline-tools button {
+  min-width: 2.2em;
+}
+
+.live {
+  margin-left: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--error);
+}
+
+.live .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--error);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  50% { opacity: 0.3; }
+}
+
+#jump-live {
+  margin-left: 8px;
 }

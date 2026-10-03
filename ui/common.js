@@ -1,6 +1,7 @@
 // Shared by the pages: API calls, formatting, the nav bar, and the live event stream.
 
 const $ = (selector, root = document) => root.querySelector(selector);
+const MINUTE_MS = 60_000;
 
 class ApiError extends Error {}
 

@@ -75,6 +75,13 @@ async fn setup(slow_exports: bool) -> Setup {
     let base = format!("http://{}", listener.local_addr().unwrap());
     let shutdown = CancellationToken::new();
     let server = tokio::spawn(server::serve(ctx.clone(), shutdown.clone(), Some(listener)));
+    // The thumbnail worker leases each segment briefly; let it finish so leases are the exports'.
+    let pool = ctx.pool.clone();
+    let thumbnailed = wait_for(Duration::from_secs(30), || async {
+        db::list_segments(&pool, stream.id).await.unwrap().iter().all(|s| s.thumbs.is_some())
+    })
+    .await;
+    assert!(thumbnailed, "thumbnails never finished");
     Setup {
         ctx,
         _dir: dir,
@@ -187,7 +194,8 @@ async fn fast_export_snaps_to_a_keyframe_and_crosses_sessions() {
     // 80 s (3.33 s into session B, whose video follows A's 6 s): 9.33 - 2 = 7.33 s of video.
     let (status, job) = s.export(14, 80, "fast").await;
     assert_eq!(status, 201, "{job}");
-    assert_eq!(job["state"], "queued");
+    // The worker may already have picked it up.
+    assert!(["queued", "running", "done"].contains(&job["state"].as_str().unwrap()), "{job}");
     let job = s.finished(job["id"].as_i64().unwrap()).await;
     assert_eq!(job.used_mode.as_deref(), Some("fast"));
     assert_eq!(job.actual_from_ms, Some(BASE + 12_000));

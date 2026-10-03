@@ -34,7 +34,11 @@
   <video id="video" controls muted playsinline></video>
 
   <div class="readout">
-    <span id="clock">–</span>
+    <span>
+      <span id="clock">–</span>
+      <span id="live" class="live" hidden><span class="dot"></span>LIVE · <span id="live-lag"></span></span>
+      <button type="button" id="jump-live" hidden>Jump to newest</button>
+    </span>
     <label class="muted">speed
       <select id="rate">
         <option value="0.25">¼×</option>
@@ -47,11 +51,15 @@
     </label>
   </div>
 
-  <div id="bar" title="Click to jump to a time">
-    <div id="selection" hidden></div>
-    <div id="cursor"></div>
+  <div id="timeline" class="timeline"></div>
+  <div class="timeline-tools muted small">
+    <span>Click to jump · scroll to zoom · drag to pan · shift-drag to select a clip · double-click to see it all</span>
+    <span>
+      <button type="button" id="zoom-in" title="Zoom in">+</button>
+      <button type="button" id="zoom-out" title="Zoom out">−</button>
+      <button type="button" id="zoom-fit">All</button>
+    </span>
   </div>
-  <div class="bar-labels muted"><span id="bar-start"></span><span id="bar-end"></span></div>
 
   <p id="message" class="muted"></p>
 
@@ -77,6 +85,7 @@
 
 <script src="vendor/hls.min.js"></script>
 <script src="common.js"></script>
+<script src="timeline.js"></script>
 <script src="player.js"></script>
 </body>
 </html>
