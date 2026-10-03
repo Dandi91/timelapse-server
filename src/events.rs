@@ -25,6 +25,14 @@ pub enum Event {
     },
     /// Streams were added, removed or reconfigured, from the UI or the CLI.
     StreamsChanged,
+    /// A running export moved on.
+    ExportUpdated {
+        id: i64,
+        state: String,
+        progress: f64,
+    },
+    /// Exports were added, finished, failed or removed.
+    ExportsChanged,
     /// This client fell behind and missed events.
     Resync,
 }

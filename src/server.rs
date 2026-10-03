@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 
 use crate::db::{self, Stream};
 use crate::events::Event;
-use crate::{Ctx, ToolVersions, reconcile, retention, supervisor, web};
+use crate::{Ctx, ToolVersions, exports, reconcile, retention, supervisor, web};
 
 struct Recorder {
     revision: i64,
@@ -26,6 +26,7 @@ struct Recorder {
 /// Runs until `shutdown`. With a `listener`, also serves the web UI and API on it.
 pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<TcpListener>) -> Result<()> {
     reconcile::run(&ctx).await?;
+    exports::recover(&ctx).await?;
     {
         let ctx = ctx.clone();
         tokio::spawn(async move { refresh_tool_versions(&ctx).await });
@@ -48,6 +49,7 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<
     });
 
     let retention = tokio::spawn(retention_loop(ctx.clone(), shutdown.clone()));
+    let exporter = tokio::spawn(exports::worker(ctx.clone(), shutdown.clone()));
     let mut recorders: HashMap<i64, Recorder> = HashMap::new();
     let mut seen = None;
     loop {
@@ -79,6 +81,7 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<
         let _ = recorder.handle.await;
     }
     let _ = retention.await;
+    let _ = exporter.await;
     if let Some(http) = http {
         let _ = http.await;
     }

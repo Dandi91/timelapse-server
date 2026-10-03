@@ -193,6 +193,8 @@ fn tail(path: &std::path::Path, lines: usize) -> String {
 pub struct SystemInfo {
     /// Bytes of recordings, across all streams.
     recordings_bytes: i64,
+    /// Bytes of finished exports.
+    exports_bytes: i64,
     disk_free_bytes: u64,
     disk_total_bytes: u64,
     /// The free-space guard: below this, the oldest segments go.
@@ -205,6 +207,7 @@ pub async fn system(State(ctx): State<Arc<Ctx>>) -> Result<Response, AppError> {
     let versions = ctx.versions.read().unwrap_or_else(|e| e.into_inner()).clone();
     Ok(Json(SystemInfo {
         recordings_bytes: db::total_segment_bytes(&ctx.pool).await?,
+        exports_bytes: db::total_export_bytes(&ctx.pool).await?,
         disk_free_bytes: free,
         disk_total_bytes: total,
         min_free_bytes: ctx.tuning.min_free_bytes,

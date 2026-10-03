@@ -12,6 +12,12 @@ the database. If a pipeline drops, it restarts with backoff in a new session.
 - **Player.** Choose a stream and a time range, and it plays the timelapse with a wall-clock
   readout. A coverage bar shows where footage exists; clicking it jumps to that time. A live
   mode follows new segments as they finish.
+- **Exports.** Pick a range under the player (or mark it from the playback position) and export it
+  as an mp4. Fast mode copies the video, so it takes seconds, and starts at the keyframe before
+  the requested time. Exact mode re-encodes and cuts to the frame. A range that spans different
+  capture settings is always re-encoded. Jobs run one at a time in the background, with live
+  progress. While a job runs, retention can't delete its segments. Interrupted jobs resume after a
+  restart.
 - **Streams.** Add, edit, enable, restart and delete streams; status updates live. You can read
   each stream's capture log, see disk usage and tool versions, and update yt-dlp.
 
@@ -75,7 +81,11 @@ Once a password is set, everything except the login page needs the session cooki
 | `GET /api/streams/{id}/log?lines=` | the end of its capture log |
 | `GET /api/system` | disk usage, the free-space minimum, tool versions |
 | `POST /api/system/update-yt-dlp` | run `yt-dlp -U` |
-| `GET /api/events` | server-sent events: status changes, segments added and removed, stream changes |
+| `GET /api/exports` | export jobs, newest first |
+| `POST /api/exports` | queue one: `{stream_id, from, to, mode: "fast" \| "exact"}` (wall-clock unix ms) |
+| `DELETE /api/exports/{id}` | cancel or delete a job, and its file |
+| `GET /api/exports/{id}/file` | the finished mp4, as a download |
+| `GET /api/events` | server-sent events: status changes, segments added and removed, stream and export changes |
 | `GET /api/streams/{id}/segments?from=&to=` | segments overlapping a wall-clock range (unix ms, either end optional) |
 | `GET /streams/{id}/playlist.m3u8?from=&to=` | HLS VOD playlist for the range; sessions are separated by discontinuities |
 | `GET /streams/{id}/playlist.m3u8?live=1&from=` | growing HLS EVENT playlist |
@@ -87,6 +97,7 @@ Once a password is set, everything except the login page needs the session cooki
 data/timelapse.db                         streams, sessions, segments
 data/streams/<stream>/capture.log         yt-dlp and ffmpeg messages (rotated at 5 MB)
 data/streams/<stream>/<session>/000000.ts segments
+data/exports/<id>.mp4                     finished exports
 ```
 
 At startup the server reconciles this directory with the database:

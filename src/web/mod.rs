@@ -1,6 +1,7 @@
 //! HTTP: the JSON API, HLS playlists, segment files, and the embedded UI.
 
 pub mod auth;
+mod jobs;
 mod manage;
 mod playlist;
 
@@ -44,6 +45,9 @@ pub fn router(ctx: Arc<Ctx>, shutdown: CancellationToken) -> Router {
         .route("/api/streams/{id}/restart", post(manage::restart))
         .route("/api/system", get(manage::system))
         .route("/api/system/update-yt-dlp", post(manage::update_yt_dlp))
+        .route("/api/exports", get(jobs::list).post(jobs::create))
+        .route("/api/exports/{id}", axum::routing::delete(jobs::remove))
+        .route("/api/exports/{id}/file", get(jobs::download))
         .route("/api/events", get(events))
         .route("/api/login", post(auth::login))
         .route("/api/logout", post(auth::logout))

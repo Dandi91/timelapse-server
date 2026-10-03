@@ -70,6 +70,24 @@ function drawBar() {
   });
   $('#bar-start').textContent = formatTime(from);
   $('#bar-end').textContent = formatTime(to);
+  drawSelection();
+}
+
+/** The export range from the form, drawn over the bar. */
+function drawSelection() {
+  const box = $('#selection');
+  const from = Date.parse($('#export-from').value);
+  const to = Date.parse($('#export-to').value);
+  if (!view || Number.isNaN(from) || Number.isNaN(to) || to <= from) {
+    box.hidden = true;
+    return;
+  }
+  const width = view.to - view.from;
+  const left = Math.max((from - view.from) / width, 0);
+  const right = Math.min((to - view.from) / width, 1);
+  box.hidden = right <= left;
+  box.style.left = `${left * 100}%`;
+  box.style.width = `${(right - left) * 100}%`;
 }
 
 function updateClock() {
@@ -201,9 +219,10 @@ function setActive(button) {
   document.querySelectorAll('.ranges button').forEach((b) => b.classList.toggle('active', b === button));
 }
 
-function toLocalInput(ms) {
+/** Value for a datetime-local input, to the minute or (`seconds`) to the second. */
+function toLocalInput(ms, seconds = false) {
   const date = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000);
-  return date.toISOString().slice(0, 16);
+  return date.toISOString().slice(0, seconds ? 19 : 16);
 }
 
 async function showRange(button) {
@@ -218,6 +237,9 @@ async function showRange(button) {
     if (view) {
       $('#from').value = toLocalInput(view.from);
       $('#to').value = toLocalInput(view.to);
+      $('#export-from').value = toLocalInput(view.from, true);
+      $('#export-to').value = toLocalInput(view.to, true);
+      drawSelection();
     }
   } catch (error) {
     message(String(error));
@@ -283,6 +305,45 @@ function onEvent(event) {
   Object.assign(stream, { status: event.status, status_detail: event.detail });
   if (stream === currentStream()) $('#stream-info').textContent = describe(stream);
 }
+
+// --- export ------------------------------------------------------------------------------------
+
+function markExport(input) {
+  if (!view) return;
+  input.value = toLocalInput(wallAt(video.currentTime), true);
+  drawSelection();
+}
+
+$('#mark-from').addEventListener('click', () => markExport($('#export-from')));
+$('#mark-to').addEventListener('click', () => markExport($('#export-to')));
+$('#export-from').addEventListener('input', drawSelection);
+$('#export-to').addEventListener('input', drawSelection);
+
+$('#export').addEventListener('click', async () => {
+  const note = $('#export-message');
+  const stream = currentStream();
+  const from = Date.parse($('#export-from').value);
+  const to = Date.parse($('#export-to').value);
+  if (!stream || Number.isNaN(from) || Number.isNaN(to)) {
+    note.textContent = 'Pick a start and an end first.';
+    return;
+  }
+  const mode = document.querySelector('input[name="export-mode"]:checked').value;
+  $('#export').disabled = true;
+  try {
+    const job = await api('api/exports', { method: 'POST', body: { stream_id: stream.id, from, to, mode } });
+    note.innerHTML = '';
+    note.append('Queued. ');
+    const link = document.createElement('a');
+    link.href = `exports.html#export=${job.id}`;
+    link.textContent = 'Follow it on the Exports page';
+    note.append(link);
+  } catch (error) {
+    note.textContent = error.message;
+  } finally {
+    $('#export').disabled = false;
+  }
+});
 
 setUpNav();
 init();

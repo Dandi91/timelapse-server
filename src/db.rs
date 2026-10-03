@@ -536,13 +536,18 @@ pub struct DoomedSegment {
 pub async fn mark_deleting(pool: &SqlitePool, ids: &[i64]) -> Result<Vec<DoomedSegment>> {
     let ids = serde_json::to_string(ids)?;
     let mut tx = pool.begin().await?;
-    sqlx::query("UPDATE segments SET state = 'deleting' WHERE id IN (SELECT value FROM json_each(?))")
-        .bind(&ids)
-        .execute(&mut *tx)
-        .await?;
+    // Re-checks leases: an export may have taken one since the candidates were picked.
+    sqlx::query(
+        "UPDATE segments SET state = 'deleting' WHERE id IN (SELECT value FROM json_each(?)) \
+         AND NOT EXISTS (SELECT 1 FROM segment_leases l WHERE l.segment_id = segments.id)",
+    )
+    .bind(&ids)
+    .execute(&mut *tx)
+    .await?;
     let doomed = sqlx::query_as(
         "SELECT s.id, s.path, ss.ended_at IS NOT NULL AS session_ended FROM segments s \
-         JOIN sessions ss ON ss.id = s.session_id WHERE s.id IN (SELECT value FROM json_each(?))",
+         JOIN sessions ss ON ss.id = s.session_id \
+         WHERE s.id IN (SELECT value FROM json_each(?)) AND s.state = 'deleting'",
     )
     .bind(&ids)
     .fetch_all(&mut *tx)
@@ -589,4 +594,211 @@ pub async fn release_leases(pool: &SqlitePool, holder: &str) -> Result<()> {
 pub async fn clear_leases(pool: &SqlitePool) -> Result<()> {
     sqlx::query("DELETE FROM segment_leases").execute(pool).await?;
     Ok(())
+}
+
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct Export {
+    pub id: i64,
+    pub stream_id: Option<i64>,
+    pub stream_label: String,
+    pub from_ms: i64,
+    pub to_ms: i64,
+    pub mode: String,
+    pub used_mode: Option<String>,
+    pub state: String,
+    pub progress: f64,
+    pub error: Option<String>,
+    pub path: Option<String>,
+    pub bytes: Option<i64>,
+    pub duration: Option<f64>,
+    pub actual_from_ms: Option<i64>,
+    pub actual_to_ms: Option<i64>,
+    pub created_at: i64,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+}
+
+const EXPORT_COLUMNS: &str = "id, stream_id, stream_label, from_ms, to_ms, mode, used_mode, state, progress, error, \
+    path, bytes, duration, actual_from_ms, actual_to_ms, created_at, started_at, finished_at";
+
+pub async fn create_export(pool: &SqlitePool, stream: &Stream, from_ms: i64, to_ms: i64, mode: &str) -> Result<i64> {
+    Ok(sqlx::query(
+        "INSERT INTO exports (stream_id, stream_label, from_ms, to_ms, mode, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(stream.id)
+    .bind(&stream.label)
+    .bind(from_ms)
+    .bind(to_ms)
+    .bind(mode)
+    .bind(now_ms())
+    .execute(pool)
+    .await?
+    .last_insert_rowid())
+}
+
+pub async fn list_exports(pool: &SqlitePool) -> Result<Vec<Export>> {
+    let sql = format!("SELECT {EXPORT_COLUMNS} FROM exports ORDER BY id DESC");
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql)).fetch_all(pool).await?)
+}
+
+pub async fn get_export(pool: &SqlitePool, id: i64) -> Result<Option<Export>> {
+    let sql = format!("SELECT {EXPORT_COLUMNS} FROM exports WHERE id = ?");
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?)
+}
+
+/// The oldest queued export, marked running.
+pub async fn start_next_export(pool: &SqlitePool) -> Result<Option<Export>> {
+    let sql = format!(
+        "UPDATE exports SET state = 'running', progress = 0, error = NULL, started_at = ? \
+         WHERE id = (SELECT id FROM exports WHERE state = 'queued' ORDER BY id LIMIT 1) RETURNING {EXPORT_COLUMNS}"
+    );
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(now_ms())
+        .fetch_optional(pool)
+        .await?)
+}
+
+pub async fn set_export_progress(pool: &SqlitePool, id: i64, progress: f64) -> Result<()> {
+    sqlx::query("UPDATE exports SET progress = ? WHERE id = ?")
+        .bind(progress)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// What the job settled on before running, so the UI can show it while it runs.
+pub async fn set_export_plan(
+    pool: &SqlitePool,
+    id: i64,
+    used_mode: &str,
+    actual_from: i64,
+    actual_to: i64,
+) -> Result<()> {
+    sqlx::query("UPDATE exports SET used_mode = ?, actual_from_ms = ?, actual_to_ms = ? WHERE id = ?")
+        .bind(used_mode)
+        .bind(actual_from)
+        .bind(actual_to)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn finish_export(pool: &SqlitePool, id: i64, path: &str, bytes: i64, duration: f64) -> Result<()> {
+    sqlx::query(
+        "UPDATE exports SET state = 'done', progress = 1, path = ?, bytes = ?, duration = ?, finished_at = ? \
+         WHERE id = ?",
+    )
+    .bind(path)
+    .bind(bytes)
+    .bind(duration)
+    .bind(now_ms())
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn fail_export(pool: &SqlitePool, id: i64, error: &str) -> Result<()> {
+    sqlx::query("UPDATE exports SET state = 'failed', error = ?, finished_at = ? WHERE id = ?")
+        .bind(error)
+        .bind(now_ms())
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Put a job back in the queue, e.g. one interrupted by a shutdown.
+pub async fn requeue_export(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query("UPDATE exports SET state = 'queued', progress = 0, started_at = NULL WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn requeue_running_exports(pool: &SqlitePool) -> Result<u64> {
+    Ok(
+        sqlx::query("UPDATE exports SET state = 'queued', progress = 0, started_at = NULL WHERE state = 'running'")
+            .execute(pool)
+            .await?
+            .rows_affected(),
+    )
+}
+
+pub async fn delete_export(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM exports WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn total_export_bytes(pool: &SqlitePool) -> Result<i64> {
+    Ok(
+        sqlx::query_scalar("SELECT COALESCE(SUM(bytes), 0) FROM exports WHERE state = 'done'")
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
+/// A segment with the capture settings of its session, as an export needs it.
+#[derive(Debug, Clone, FromRow)]
+pub struct ExportSegment {
+    pub id: i64,
+    pub session_id: i64,
+    pub path: String,
+    pub wall_start: i64,
+    pub wall_end: i64,
+    pub media_dur: f64,
+    pub settings: Json<EncodeSettings>,
+}
+
+/// Lease every ready segment of the stream overlapping `[from, to)` for `holder`, in one step,
+/// and return them in playback order. Retention can't delete a leased segment.
+pub async fn lease_range(
+    pool: &SqlitePool,
+    stream_id: i64,
+    from: i64,
+    to: i64,
+    holder: &str,
+) -> Result<Vec<ExportSegment>> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO segment_leases (segment_id, holder) SELECT id, ? FROM segments \
+         WHERE stream_id = ? AND state = 'ready' AND wall_end > ? AND wall_start < ?",
+    )
+    .bind(holder)
+    .bind(stream_id)
+    .bind(from)
+    .bind(to)
+    .execute(&mut *tx)
+    .await?;
+    let segments = sqlx::query_as(
+        "SELECT s.id, s.session_id, s.path, s.wall_start, s.wall_end, s.media_dur, ss.settings \
+         FROM segments s JOIN sessions ss ON ss.id = s.session_id \
+         JOIN segment_leases l ON l.segment_id = s.id AND l.holder = ? \
+         WHERE s.state = 'ready' ORDER BY s.session_id, s.seq",
+    )
+    .bind(holder)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(segments)
+}
+
+pub async fn count_segments_in_range(pool: &SqlitePool, stream_id: i64, from: i64, to: i64) -> Result<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT COUNT(*) FROM segments WHERE stream_id = ? AND state = 'ready' AND wall_end > ? AND wall_start < ?",
+    )
+    .bind(stream_id)
+    .bind(from)
+    .bind(to)
+    .fetch_one(pool)
+    .await?)
 }

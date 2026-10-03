@@ -282,7 +282,8 @@ async function refreshSystem() {
   $('#disk-bar .other').style.width = `${((used - recordings) / total) * 100}%`;
   const low = system.disk_free_bytes < system.min_free_bytes;
   $('#disk-text').textContent =
-    `Recordings ${formatBytes(system.recordings_bytes)} · ${formatBytes(system.disk_free_bytes)} free of ${formatBytes(total)}` +
+    `Recordings ${formatBytes(system.recordings_bytes)} · exports ${formatBytes(system.exports_bytes)} · ` +
+    `${formatBytes(system.disk_free_bytes)} free of ${formatBytes(total)}` +
     (low ? ` · below the ${formatBytes(system.min_free_bytes)} minimum: oldest footage is being pruned` : '');
   $('#disk-text').classList.toggle('error', low);
   const v = system.versions;

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timelapses · exports</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Timelapses</h1>
+  <nav><a href="./">Player</a><a href="exports.html" aria-current="page">Exports</a><a href="manage.html">Streams</a></nav>
+  <button id="logout" class="link" hidden>Log out</button>
+</header>
+
+<main>
+  <div class="toolbar">
+    <h2>Exports</h2>
+    <span class="muted small">Start one from the player: pick a range under the video.</span>
+  </div>
+  <p id="message" class="error" role="alert"></p>
+  <div class="table-wrap">
+    <table id="exports">
+      <thead>
+        <tr><th>Stream</th><th>Range</th><th>Mode</th><th>State</th><th>Clip</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p id="empty" class="muted" hidden>No exports yet.</p>
+</main>
+
+<script src="common.js"></script>
+<script src="exports.js"></script>
+</body>
+</html>

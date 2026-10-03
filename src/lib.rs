@@ -1,5 +1,6 @@
 pub mod db;
 pub mod events;
+pub mod exports;
 pub mod pipeline;
 pub mod procs;
 pub mod reconcile;
@@ -70,6 +71,7 @@ pub struct Ctx {
     /// Wakes the recorder manager to reread the stream table now rather than at the next poll.
     pub wake: Notify,
     pub versions: RwLock<ToolVersions>,
+    pub exports: exports::Control,
 }
 
 impl Ctx {
@@ -83,6 +85,7 @@ impl Ctx {
             events: broadcast::channel(256).0,
             wake: Notify::new(),
             versions: RwLock::default(),
+            exports: exports::Control::default(),
         }
     }
 

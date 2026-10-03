@@ -190,7 +190,7 @@ video {
   width: 2px;
   background: var(--accent);
   pointer-events: none;
-  z-index: 1;
+  z-index: 2;
 }
 
 .bar-labels {
@@ -386,4 +386,83 @@ main.login {
 
 main.login h1 {
   margin-bottom: 16px;
+}
+
+/* --- exports --- */
+
+/* Above the footage spans, below the cursor. */
+#selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  min-width: 4px;
+  background: rgb(0 0 0 / 22%);
+  border-left: 2px solid var(--accent);
+  border-right: 2px solid var(--accent);
+  pointer-events: none;
+}
+
+.export {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.export h2 {
+  margin-bottom: 8px;
+}
+
+.export-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.export-row label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.badge.queued {
+  color: var(--muted);
+}
+
+.badge.running {
+  background: var(--accent);
+  color: #fff;
+}
+
+.badge.done {
+  background: var(--ok);
+  color: #fff;
+}
+
+.badge.failed {
+  background: var(--error);
+  color: #fff;
+}
+
+.state-cell progress {
+  display: block;
+  width: 120px;
+  margin-top: 4px;
+}
+
+a.button {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+tr.highlight {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
