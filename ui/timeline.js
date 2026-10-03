@@ -340,7 +340,7 @@ class Timeline {
       const midnight = date.getHours() === 0 && date.getMinutes() === 0;
       const text = midnight || step >= DAY
         ? date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
-        : date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        : date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
       const width = g.measureText(text).width;
       g.fillText(text, Math.min(Math.max(x - width / 2, 0), W - width), track + 6);
     }

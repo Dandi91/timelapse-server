@@ -25,6 +25,7 @@ async function api(path, { method = 'GET', body } = {}) {
 function formatTime(ms) {
   return new Date(ms).toLocaleString(undefined, {
     weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
   });
 }
 

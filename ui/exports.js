@@ -35,7 +35,7 @@ function td(content, className) {
 function rangeText(from, to) {
   const sameDay = new Date(from).toDateString() === new Date(to).toDateString();
   const end = sameDay
-    ? new Date(to).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    ? new Date(to).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
     : formatTime(to);
   return `${formatTime(from)} – ${end}`;
 }
