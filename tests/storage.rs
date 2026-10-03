@@ -159,8 +159,24 @@ async fn reconcile_repairs_a_crashed_data_dir() {
     // A stale lease from an export that died with the process.
     db::lease_segment(&ctx.pool, vanished, "export-x").await.ok();
 
+    // The crash left statuses behind; one stream got disabled meanwhile.
+    db::set_status(&ctx.pool, stream.id, "recording", Some("x"))
+        .await
+        .unwrap();
+    let off = add_stream(ctx, "off").await;
+    let mut config = off.config();
+    config.enabled = false;
+    db::update_stream(&ctx.pool, &off, &config).await.unwrap();
+    db::set_status(&ctx.pool, off.id, "recording", None).await.unwrap();
+
     let report = reconcile::run(ctx).await.unwrap();
     assert_eq!(report.missing_rows, 1);
+    let status = |label: &'static str| async move {
+        let s = db::find_stream(&ctx.pool, label).await.unwrap().unwrap();
+        (s.status, s.status_detail)
+    };
+    assert_eq!(status("cam").await, ("idle".to_string(), None));
+    assert_eq!(status("off").await, ("stopped".to_string(), None));
     assert_eq!(report.adopted, 1);
 
     let segments = db::list_segments(&ctx.pool, stream.id).await.unwrap();

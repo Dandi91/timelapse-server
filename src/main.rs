@@ -33,6 +33,10 @@ struct Cli {
 enum Command {
     /// Record every enabled stream until stopped; picks up stream changes as they happen.
     Serve {
+        /// Address for the web UI and API. There is no authentication yet: keep it on localhost or
+        /// a trusted network.
+        #[arg(long, env = "TIMELAPSE_BIND", default_value = "127.0.0.1:8080")]
+        bind: String,
         /// Prune the oldest segments across all streams when free space drops below this.
         #[arg(long, env = "TIMELAPSE_MIN_FREE", default_value = "5G", value_parser = parse_size)]
         min_free: i64,
@@ -166,7 +170,10 @@ async fn main() -> Result<()> {
     let pool = db::connect(&data_dir.join("timelapse.db")).await?;
 
     match cli.command {
-        Command::Serve { min_free } => {
+        Command::Serve { bind, min_free } => {
+            let listener = tokio::net::TcpListener::bind(&bind)
+                .await
+                .with_context(|| format!("listening on {bind}"))?;
             let tools = Tools {
                 yt_dlp: cli.yt_dlp,
                 ffmpeg: cli.ffmpeg,
@@ -184,7 +191,7 @@ async fn main() -> Result<()> {
             });
             let shutdown = CancellationToken::new();
             tokio::spawn(stop_on_signal(shutdown.clone()));
-            server::serve(ctx, shutdown).await?;
+            server::serve(ctx, shutdown, Some(listener)).await?;
         }
         Command::Add { url, label, options } => {
             let mut config = StreamConfig {

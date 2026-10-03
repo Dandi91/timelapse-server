@@ -7,8 +7,12 @@ Each stream runs `yt-dlp -o - | ffmpeg`. ffmpeg keeps every Nth frame, re-times 
 writes MPEG-TS segments. It reports each finished segment on stdout, and the server records it in
 the database. If a pipeline drops, it restarts with backoff in a new session.
 
-The web UI with an HLS player and clip export is still to come. For now the server is managed
-through the CLI.
+`serve` also serves a web player on `--bind` (default `127.0.0.1:8080`). You choose a stream and a
+time range, and it plays the timelapse with a wall-clock readout. A coverage bar shows where
+footage exists; clicking it jumps to that time. A live mode follows new segments as they finish.
+Managing streams from the browser and exporting clips are still to come; for now that's the CLI.
+
+There is no authentication yet. Keep the port on localhost or a trusted network.
 
 ## Usage
 
@@ -49,6 +53,16 @@ Global options are also available as environment variables:
 | `--ffprobe` | `TIMELAPSE_FFPROBE` | `ffprobe` |
 | `--min-free` (serve only) | `TIMELAPSE_MIN_FREE` | 5G; below this, the oldest segments across all streams are pruned |
 
+### HTTP API
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/streams` | streams with status, settings, and footage totals |
+| `GET /api/streams/{id}/segments?from=&to=` | segments overlapping a wall-clock range (unix ms, either end optional) |
+| `GET /streams/{id}/playlist.m3u8?from=&to=` | HLS VOD playlist for the range; sessions are separated by discontinuities |
+| `GET /streams/{id}/playlist.m3u8?live=1&from=` | growing HLS EVENT playlist |
+| `GET /streams/{id}/{session}/{n}.ts` | segment files, relative to the playlist |
+
 ### Data directory
 
 ```
@@ -71,7 +85,7 @@ current.
 ```sh
 docker pull ghcr.io/dandi91/timelapse-server:latest
 docker run -d --name timelapse --restart unless-stopped --stop-timeout 120 \
-    -v /srv/timelapse:/data ghcr.io/dandi91/timelapse-server:latest
+    -p 8080:8080 -v /srv/timelapse:/data ghcr.io/dandi91/timelapse-server:latest
 docker exec timelapse timelapse-server add 'https://www.youtube.com/watch?v=...' --label cam1
 docker exec timelapse timelapse-server list
 ```

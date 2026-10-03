@@ -6,13 +6,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::db::{self, Stream};
-use crate::{Ctx, reconcile, retention, supervisor};
+use crate::{Ctx, reconcile, retention, supervisor, web};
 
 struct Recorder {
     revision: i64,
@@ -20,9 +21,26 @@ struct Recorder {
     handle: JoinHandle<()>,
 }
 
-pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken) -> Result<()> {
+/// Runs until `shutdown`. With a `listener`, also serves the web UI and API on it.
+pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<TcpListener>) -> Result<()> {
     reconcile::run(&ctx).await?;
     tokio::spawn(log_tool_versions(ctx.clone()));
+
+    let http = listener.map(|listener| {
+        if let Ok(addr) = listener.local_addr() {
+            info!("web UI on http://{addr}");
+        }
+        let app = web::router(ctx.clone());
+        let stop = shutdown.clone();
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, app)
+                .with_graceful_shutdown(stop.cancelled_owned())
+                .await
+            {
+                error!("web server failed: {e}");
+            }
+        })
+    });
 
     let retention = tokio::spawn(retention_loop(ctx.clone(), shutdown.clone()));
     let mut recorders: HashMap<i64, Recorder> = HashMap::new();
@@ -45,6 +63,9 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken) -> Result<()> {
         let _ = recorder.handle.await;
     }
     let _ = retention.await;
+    if let Some(http) = http {
+        let _ = http.await;
+    }
     Ok(())
 }
 

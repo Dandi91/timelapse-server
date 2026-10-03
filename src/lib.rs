@@ -7,6 +7,7 @@ pub mod server;
 pub mod settings;
 pub mod supervisor;
 pub mod units;
+pub mod web;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

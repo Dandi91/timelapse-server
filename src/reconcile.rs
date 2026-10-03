@@ -36,6 +36,8 @@ pub async fn run(ctx: &Ctx) -> Result<ReconcileReport> {
     }
     leftovers.join_all().await;
     db::end_open_sessions(&ctx.pool).await?;
+    // Statuses are only ever set by running recorders, so a crash leaves them stale.
+    db::reset_statuses(&ctx.pool).await?;
 
     // Finish deletes that were interrupted between marking and unlinking.
     let doomed: Vec<i64> = db::deleting_segments(&ctx.pool)

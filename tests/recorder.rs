@@ -124,7 +124,7 @@ async fn failing_fetcher_is_retried_with_status() {
 async fn server_follows_the_stream_table() {
     let f = fixture(&pattern_source(600, true)).await;
     let shutdown = CancellationToken::new();
-    let server = tokio::spawn(server::serve(f.ctx.clone(), shutdown.clone()));
+    let server = tokio::spawn(server::serve(f.ctx.clone(), shutdown.clone(), None));
 
     // Added while running: picked up and recording within a few seconds.
     let stream = add_stream(&f.ctx, "cam").await;

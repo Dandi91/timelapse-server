@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timelapses</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Timelapses</h1>
+  <select id="stream" aria-label="Stream"></select>
+  <span id="stream-info" class="muted"></span>
+</header>
+
+<main>
+  <div class="ranges">
+    <button data-range="all">Everything</button>
+    <button data-range="86400000">Last 24 h</button>
+    <button data-range="3600000">Last hour</button>
+    <button data-range="live">Live</button>
+    <span class="custom">
+      <input type="datetime-local" id="from" aria-label="From">
+      –
+      <input type="datetime-local" id="to" aria-label="To">
+      <button id="load-custom">Show</button>
+    </span>
+  </div>
+
+  <video id="video" controls muted playsinline></video>
+
+  <div class="readout">
+    <span id="clock">–</span>
+    <label class="muted">speed
+      <select id="rate">
+        <option value="0.25">¼×</option>
+        <option value="0.5">½×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+        <option value="8">8×</option>
+      </select>
+    </label>
+  </div>
+
+  <div id="bar" title="Click to jump to a time">
+    <div id="cursor"></div>
+  </div>
+  <div class="bar-labels muted"><span id="bar-start"></span><span id="bar-end"></span></div>
+
+  <p id="message" class="muted"></p>
+</main>
+
+<script src="vendor/hls.min.js"></script>
+<script src="player.js"></script>
+</body>
+</html>

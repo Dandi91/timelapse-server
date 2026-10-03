@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::types::Json;
 use sqlx::{FromRow, SqlitePool};
@@ -262,6 +263,19 @@ pub async fn open_pipelines(pool: &SqlitePool) -> Result<Vec<OpenPipeline>> {
 }
 
 /// Close sessions left open by a crash. Only valid while no recorder is running.
+/// Nothing is recording before the server starts its recorders: `stopped` for disabled streams,
+/// `idle` for the rest until their recorder reports in.
+pub async fn reset_statuses(pool: &SqlitePool) -> Result<()> {
+    sqlx::query(
+        "UPDATE streams SET status = CASE WHEN enabled THEN 'idle' ELSE 'stopped' END, \
+         status_detail = NULL, status_at = ?",
+    )
+    .bind(now_ms())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn end_open_sessions(pool: &SqlitePool) -> Result<u64> {
     Ok(
         sqlx::query("UPDATE sessions SET ended_at = ?, fetcher = NULL, encoder = NULL WHERE ended_at IS NULL")
@@ -283,7 +297,7 @@ pub async fn delete_empty_sessions(pool: &SqlitePool) -> Result<Vec<Session>> {
     .await?)
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Segment {
     pub id: i64,
     pub session_id: i64,
@@ -350,6 +364,68 @@ pub async fn session_last_wall_end(pool: &SqlitePool, session_id: i64) -> Result
             .fetch_one(pool)
             .await?,
     )
+}
+
+/// Ready segments overlapping `[from, to)` in wall-clock time, in playback order: session by
+/// session, each in recording order.
+pub async fn segments_in_range(
+    pool: &SqlitePool,
+    stream_id: i64,
+    from: Option<i64>,
+    to: Option<i64>,
+) -> Result<Vec<Segment>> {
+    Ok(sqlx::query_as(
+        "SELECT id, session_id, stream_id, seq, path, wall_start, wall_end, media_start, media_end, media_dur, \
+         bytes, state FROM segments WHERE stream_id = ? AND state = 'ready' AND wall_end > ? AND wall_start < ? \
+         ORDER BY session_id, seq",
+    )
+    .bind(stream_id)
+    .bind(from.unwrap_or(i64::MIN))
+    .bind(to.unwrap_or(i64::MAX))
+    .fetch_all(pool)
+    .await?)
+}
+
+/// A stream with what it has on disk, for the UI.
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct StreamSummary {
+    pub id: i64,
+    pub label: String,
+    pub url: String,
+    pub enabled: bool,
+    pub live_only: bool,
+    pub settings: Json<EncodeSettings>,
+    pub max_bytes: Option<i64>,
+    pub max_duration_secs: Option<i64>,
+    pub status: String,
+    pub status_detail: Option<String>,
+    pub status_at: Option<i64>,
+    pub segments: i64,
+    pub bytes: i64,
+    pub first_wall: Option<i64>,
+    pub last_wall: Option<i64>,
+}
+
+pub async fn stream_summaries(pool: &SqlitePool) -> Result<Vec<StreamSummary>> {
+    Ok(sqlx::query_as(
+        "SELECT s.id, s.label, s.url, s.enabled, s.live_only, s.settings, s.max_bytes, s.max_duration_secs, \
+         s.status, s.status_detail, s.status_at, COUNT(g.id) AS segments, COALESCE(SUM(g.bytes), 0) AS bytes, \
+         MIN(g.wall_start) AS first_wall, MAX(g.wall_end) AS last_wall \
+         FROM streams s LEFT JOIN segments g ON g.stream_id = s.id AND g.state = 'ready' \
+         GROUP BY s.id ORDER BY s.id",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn get_stream(pool: &SqlitePool, id: i64) -> Result<Option<Stream>> {
+    Ok(sqlx::query_as(
+        "SELECT id, label, url, enabled, live_only, settings, max_bytes, max_duration_secs, revision, \
+         created_at, status, status_detail, status_at FROM streams WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?)
 }
 
 pub async fn all_segments(pool: &SqlitePool) -> Result<Vec<Segment>> {

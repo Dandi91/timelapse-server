@@ -34,8 +34,10 @@ COPY --from=build /timelapse-server /usr/local/bin/timelapse-server
 USER timelapse
 ENV TIMELAPSE_DATA_DIR=/data \
     TIMELAPSE_YT_DLP=/opt/yt-dlp/yt-dlp \
+    TIMELAPSE_BIND=0.0.0.0:8080 \
     RUST_LOG=info
 VOLUME /data
+EXPOSE 8080
 # tini as PID 1 reaps the ffmpeg that yt-dlp leaves behind when it exits first, and passes
 # SIGTERM on once, so `docker stop` finishes the segments in flight.
 ENTRYPOINT ["/usr/bin/tini", "--", "timelapse-server"]
