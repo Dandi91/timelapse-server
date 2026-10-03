@@ -77,7 +77,7 @@ function row(stream) {
 
   const limit = (value, format) => (value == null ? '' : ` / ${format(value)}`);
   tr.append(cell(`${formatBytes(stream.bytes)}${limit(stream.max_bytes, formatBytes)}`, 'small'));
-  const recorded = stream.first_wall == null ? 0 : recordedSeconds(stream);
+  const recorded = stream.recorded_ms / 1000;
   tr.append(cell(`${formatDuration(recorded)}${limit(stream.max_duration_secs, formatDuration)}`, 'small'));
 
   const actions = document.createElement('div');
@@ -90,11 +90,6 @@ function row(stream) {
   );
   tr.append(cell(actions));
   return tr;
-}
-
-/** Wall-clock span from first to last footage; gaps included, so an upper bound. */
-function recordedSeconds(stream) {
-  return Math.max(0, (stream.last_wall - stream.first_wall) / 1000);
 }
 
 function statusCell(stream) {

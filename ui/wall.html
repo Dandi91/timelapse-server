@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Timelapses</title>
+<title>Timelapses · wall</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
   <h1>Timelapses</h1>
-  <nav><a href="./" aria-current="page">Player</a><a href="wall.html">Wall</a><a href="exports.html">Exports</a><a href="manage.html">Streams</a></nav>
+  <nav><a href="./">Player</a><a href="wall.html" aria-current="page">Wall</a><a href="exports.html">Exports</a><a href="manage.html">Streams</a></nav>
   <button id="logout" class="link" hidden>Log out</button>
 </header>
 <div class="stream-bar">
-  <select id="stream" aria-label="Stream"></select>
-  <span id="stream-info" class="muted"></span>
+  <span class="muted">Cameras (up to 4):</span>
+  <span id="pickers" class="pickers"></span>
 </div>
 
 <main>
@@ -23,21 +23,15 @@
     <button data-range="86400000">Last 24 h</button>
     <button data-range="3600000">Last hour</button>
     <button data-range="live">Live</button>
-    <span class="custom">
-      <input type="datetime-local" id="from" aria-label="From">
-      –
-      <input type="datetime-local" id="to" aria-label="To">
-      <button id="load-custom">Show</button>
-    </span>
   </div>
 
-  <section id="player" class="player" aria-label="Player">
-    <video id="video" muted playsinline></video>
+  <section id="wall" class="player wall" aria-label="Wall">
+    <div id="grid" class="wall-grid"></div>
     <div class="controls">
       <button type="button" id="play" class="play" title="Play (space)"><span class="glyph">▶</span></button>
       <span id="clock">–</span>
       <span id="live" class="live" hidden><span class="dot"></span>LIVE · <span id="live-lag"></span></span>
-      <button type="button" id="jump-live" hidden>Jump to newest</button>
+      <span id="waiting" class="muted small" hidden>loading…</span>
       <span class="spacer"></span>
       <label class="muted">speed
         <select id="rate">
@@ -53,7 +47,7 @@
     </div>
     <div id="timeline" class="timeline"></div>
     <div class="timeline-tools muted small">
-      <span>Click to jump · scroll to zoom · drag to pan · shift-drag to select a clip · double-click to see it all ·
+      <span>All cameras follow one clock · click to jump · scroll to zoom · drag to pan · shift-drag to select ·
         keys: space, ←/→, ,/. for frames, f</span>
       <span>
         <button type="button" id="zoom-in" title="Zoom in">+</button>
@@ -65,21 +59,15 @@
 
   <p id="message" class="muted"></p>
 
-  <section class="export" aria-label="Export a clip">
-    <h2>Export a clip</h2>
+  <section class="export" aria-label="Export every camera">
+    <h2>Export the same moment from every camera</h2>
     <div class="export-row">
-      <label>From <input type="datetime-local" id="export-from" step="1"></label>
-      <button type="button" id="mark-from" title="Use the current playback position">Set to now playing</button>
-      <label>To <input type="datetime-local" id="export-to" step="1"></label>
-      <button type="button" id="mark-to" title="Use the current playback position">Set to now playing</button>
+      <span id="export-range" class="muted">Shift-drag on the timeline to pick a range.</span>
     </div>
     <div class="export-row">
-      <label><input type="radio" name="export-mode" value="fast" checked> Fast: copies the video; starts at the
-        keyframe before "From"</label>
-      <label><input type="radio" name="export-mode" value="exact"> Exact: re-encodes; cuts to the frame, slower</label>
-    </div>
-    <div class="export-row">
-      <button type="button" id="export" class="primary">Export</button>
+      <label><input type="radio" name="export-mode" value="fast" checked> Fast (from the keyframe before)</label>
+      <label><input type="radio" name="export-mode" value="exact"> Exact (re-encodes)</label>
+      <button type="button" id="export" class="primary">Export each camera</button>
       <span id="export-message" class="muted"></span>
     </div>
   </section>
@@ -90,6 +78,6 @@
 <script src="timeline.js"></script>
 <script src="camplayer.js"></script>
 <script src="controls.js"></script>
-<script src="player.js"></script>
+<script src="wall.js"></script>
 </body>
 </html>

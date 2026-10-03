@@ -1,14 +1,16 @@
-// A wall-clock timeline: footage and gaps, playback cursor, export selection and time ticks.
-// Scroll to zoom around the pointer, drag to pan, click to seek, shift-drag to select a range,
-// hover for the time and a thumbnail.
+// A wall-clock timeline: footage and gaps (one lane per camera), playback cursor, export
+// selection and time ticks. Scroll to zoom around the pointer, drag to pan, click to seek,
+// shift-drag to select a range, hover for the time and a thumbnail of the lane under the pointer.
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const TICK_STEPS = [MINUTE, 5 * MINUTE, 10 * MINUTE, 15 * MINUTE, 30 * MINUTE, HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, DAY];
 const MIN_SPAN = 2 * MINUTE;
-const TRACK = 26;
-const HEIGHT = 44;
+const SINGLE_LANE = 26;
+const LANE = 18;
+const LANE_GAP = 2;
+const TICKS = 18;
 const DRAG_THRESHOLD = 4;
 
 class Timeline {
@@ -21,12 +23,11 @@ class Timeline {
     this.thumbUrl = thumbUrl;
     this.onSeek = onSeek;
     this.onSelect = onSelect;
-    this.segments = [];
+    this.lanes = [];
     this.domain = [0, 1];
     this.viewport = [0, 1];
     this.cursor = null;
     this.selection = null;
-    this.recordingFrom = null;
     this.drag = null;
 
     this.canvas = document.createElement('canvas');
@@ -51,17 +52,33 @@ class Timeline {
     root.addEventListener('dblclick', () => this.fit());
   }
 
-  /** New footage. The viewport stays where it was if it still makes sense, else shows it all. */
-  setData({ segments, from, to, recordingFrom = null }) {
+  /**
+   * New footage: `lanes` is `[{label, segments, recordingFrom}]`, one per camera; `recordingFrom`
+   * (live only) is where footage still being recorded starts. The viewport stays where it was if
+   * it still makes sense, else shows it all.
+   */
+  setData({ lanes, from, to }) {
     const sameDomain = this.domain[0] === from;
-    this.segments = segments;
-    this.recordingFrom = recordingFrom;
     const [oldFrom, oldTo] = this.domain;
-    this.domain = [from, Math.max(to, from + MIN_SPAN)];
     const zoomed = this.viewport[0] > oldFrom || this.viewport[1] < oldTo;
+    this.lanes = lanes;
+    this.domain = [from, Math.max(to, from + MIN_SPAN)];
     if (!sameDomain || !zoomed) this.viewport = [...this.domain];
     this.clampViewport();
+    this.root.style.height = `${this.trackHeight() + TICKS}px`;
     this.draw();
+  }
+
+  trackHeight() {
+    return this.lanes.length <= 1 ? SINGLE_LANE : this.lanes.length * (LANE + LANE_GAP) - LANE_GAP;
+  }
+
+  laneTop(i) {
+    return this.lanes.length <= 1 ? 0 : i * (LANE + LANE_GAP);
+  }
+
+  laneHeight() {
+    return this.lanes.length <= 1 ? SINGLE_LANE : LANE;
   }
 
   setCursor(ms) {
@@ -123,32 +140,38 @@ class Timeline {
     return ((ms - a) / (b - a)) * this.width();
   }
 
-  localX(event) {
-    return event.clientX - this.root.getBoundingClientRect().left;
+  local(event) {
+    const box = this.root.getBoundingClientRect();
+    return [event.clientX - box.left, event.clientY - box.top];
+  }
+
+  laneAt(y) {
+    if (this.lanes.length <= 1) return 0;
+    return Math.min(Math.max(Math.floor(y / (LANE + LANE_GAP)), 0), this.lanes.length - 1);
   }
 
   // --- interaction ---------------------------------------------------------------------------
 
   onWheel(event) {
     event.preventDefault();
-    const factor = Math.exp(Math.sign(event.deltaY) * 0.2);
-    this.zoom(factor, this.msAt(this.localX(event)));
-    this.showHover(this.localX(event));
+    const [x, y] = this.local(event);
+    this.zoom(Math.exp(Math.sign(event.deltaY) * 0.2), this.msAt(x));
+    this.showHover(x, y);
   }
 
   onDown(event) {
     if (event.button !== 0) return;
     // Keeps drags going outside the timeline; not available for every pointer.
     try { this.root.setPointerCapture(event.pointerId); } catch { /* fine without */ }
-    const x = this.localX(event);
+    const [x] = this.local(event);
     this.drag = { x, viewport: [...this.viewport], select: event.shiftKey, moved: false, from: this.msAt(x) };
   }
 
   onMove(event) {
-    const x = this.localX(event);
+    const [x, y] = this.local(event);
     const drag = this.drag;
     if (!drag) {
-      this.showHover(x);
+      this.showHover(x, y);
       return;
     }
     if (Math.abs(x - drag.x) > DRAG_THRESHOLD) drag.moved = true;
@@ -156,7 +179,7 @@ class Timeline {
     if (drag.select) {
       const to = this.msAt(x);
       this.selection = [Math.min(drag.from, to), Math.max(drag.from, to)];
-      this.showHover(x);
+      this.showHover(x, y);
     } else {
       const [a, b] = drag.viewport;
       const shift = ((x - drag.x) / this.width()) * (b - a);
@@ -172,7 +195,7 @@ class Timeline {
     this.drag = null;
     if (!drag) return;
     if (!drag.moved) {
-      this.onSeek(this.msAt(this.localX(event)));
+      this.onSeek(this.msAt(this.local(event)[0]));
     } else if (drag.select && this.selection) {
       this.onSelect(...this.selection.map(Math.round));
     }
@@ -180,18 +203,21 @@ class Timeline {
 
   // --- hover -----------------------------------------------------------------------------------
 
-  /** The segment at `ms` and where in its video that is, or null in a gap. */
-  footageAt(ms) {
-    const seg = this.segments.find((s) => s.wall_start <= ms && ms < s.wall_end);
+  /** The segment of lane `lane` at `ms` and where in its video that is, or null in a gap. */
+  footageAt(lane, ms) {
+    const seg = this.lanes[lane]?.segments.find((s) => s.wall_start <= ms && ms < s.wall_end);
     if (!seg) return null;
     const fraction = (ms - seg.wall_start) / Math.max(seg.wall_end - seg.wall_start, 1);
     return { seg, videoOffset: fraction * seg.media_dur };
   }
 
-  showHover(x) {
+  showHover(x, y) {
     const ms = this.msAt(x);
-    const at = this.footageAt(ms);
-    this.label.textContent = formatTime(ms) + (at || !this.segments.length ? '' : ' · no footage');
+    const lane = this.laneAt(y);
+    const at = this.footageAt(lane, ms);
+    const name = this.lanes.length > 1 ? `${this.lanes[lane].label} · ` : '';
+    const hasAny = this.lanes.some((l) => l.segments.length);
+    this.label.textContent = name + formatTime(ms) + (at || !hasAny ? '' : ' · no footage');
     const thumbs = at?.seg.thumbs;
     if (thumbs) {
       const tile = Math.min(Math.floor(at.videoOffset / at.seg.thumb_interval), thumbs - 1);
@@ -211,75 +237,93 @@ class Timeline {
 
   draw() {
     const W = this.width();
+    const track = this.trackHeight();
+    const height = track + TICKS;
     const ratio = window.devicePixelRatio || 1;
-    if (this.canvas.width !== Math.round(W * ratio)) {
+    if (this.canvas.width !== Math.round(W * ratio) || this.canvas.height !== Math.round(height * ratio)) {
       this.canvas.width = Math.round(W * ratio);
-      this.canvas.height = Math.round(HEIGHT * ratio);
+      this.canvas.height = Math.round(height * ratio);
       this.canvas.style.width = `${W}px`;
-      this.canvas.style.height = `${HEIGHT}px`;
+      this.canvas.style.height = `${height}px`;
     }
     const g = this.canvas.getContext('2d');
     g.setTransform(ratio, 0, 0, ratio, 0, 0);
-    g.clearRect(0, 0, W, HEIGHT);
+    g.clearRect(0, 0, W, height);
     const css = getComputedStyle(this.root);
     const color = (name) => css.getPropertyValue(name).trim();
+    const laneH = this.laneHeight();
 
-    // Gaps are the bare track; footage is drawn per session, continuous within one.
-    g.fillStyle = color('--line');
-    g.fillRect(0, 0, W, TRACK);
-    g.fillStyle = color('--footage');
-    let start = null;
-    this.segments.forEach((seg, i) => {
-      start ??= seg.wall_start;
-      const next = this.segments[i + 1];
-      if (!next || next.session_id !== seg.session_id || next.wall_start - seg.wall_end > 1000) {
-        const x1 = this.xAt(start);
-        const x2 = this.xAt(seg.wall_end);
-        if (x2 >= 0 && x1 <= W) g.fillRect(x1, 0, Math.max(x2 - x1, 1), TRACK);
-        start = null;
-      }
-    });
-
-    // Live: being recorded, not watchable until its segment finishes.
-    if (this.recordingFrom != null) {
-      const x1 = Math.max(this.xAt(this.recordingFrom), 0);
-      const x2 = Math.min(this.xAt(this.domain[1]), W);
-      if (x2 > x1) {
-        g.save();
-        g.beginPath();
-        g.rect(x1, 0, x2 - x1, TRACK);
-        g.clip();
-        g.strokeStyle = color('--footage');
-        g.lineWidth = 2;
-        for (let x = x1 - TRACK; x < x2; x += 7) {
-          g.beginPath();
-          g.moveTo(x, TRACK);
-          g.lineTo(x + TRACK, 0);
-          g.stroke();
-        }
-        g.restore();
-      }
+    this.lanes.forEach((lane, i) => this.drawLane(g, W, lane, this.laneTop(i), laneH, color));
+    if (!this.lanes.length) {
+      g.fillStyle = color('--line');
+      g.fillRect(0, 0, W, track);
     }
 
     if (this.selection) {
       const x1 = this.xAt(this.selection[0]);
       const x2 = this.xAt(this.selection[1]);
       g.fillStyle = 'rgb(0 0 0 / 22%)';
-      g.fillRect(x1, 0, x2 - x1, TRACK);
+      g.fillRect(x1, 0, x2 - x1, track);
       g.fillStyle = color('--accent');
-      g.fillRect(x1 - 1, 0, 2, TRACK);
-      g.fillRect(x2 - 1, 0, 2, TRACK);
+      g.fillRect(x1 - 1, 0, 2, track);
+      g.fillRect(x2 - 1, 0, 2, track);
     }
 
     if (this.cursor != null) {
       g.fillStyle = color('--accent');
-      g.fillRect(Math.round(this.xAt(this.cursor)) - 1, 0, 2, TRACK);
+      g.fillRect(Math.round(this.xAt(this.cursor)) - 1, 0, 2, track);
     }
 
-    this.drawTicks(g, W, color('--muted'));
+    this.drawTicks(g, W, track, color('--muted'));
   }
 
-  drawTicks(g, W, muted) {
+  drawLane(g, W, lane, top, h, color) {
+    // Gaps are the bare track; footage is drawn per session, continuous within one.
+    g.fillStyle = color('--line');
+    g.fillRect(0, top, W, h);
+    g.fillStyle = color('--footage');
+    let start = null;
+    lane.segments.forEach((seg, i) => {
+      start ??= seg.wall_start;
+      const next = lane.segments[i + 1];
+      if (!next || next.session_id !== seg.session_id || next.wall_start - seg.wall_end > 1000) {
+        const x1 = this.xAt(start);
+        const x2 = this.xAt(seg.wall_end);
+        if (x2 >= 0 && x1 <= W) g.fillRect(x1, top, Math.max(x2 - x1, 1), h);
+        start = null;
+      }
+    });
+
+    // Live: being recorded, not watchable until its segment finishes.
+    if (lane.recordingFrom != null) {
+      const x1 = Math.max(this.xAt(lane.recordingFrom), 0);
+      const x2 = Math.min(this.xAt(this.domain[1]), W);
+      if (x2 > x1) {
+        g.save();
+        g.beginPath();
+        g.rect(x1, top, x2 - x1, h);
+        g.clip();
+        g.strokeStyle = color('--footage');
+        g.lineWidth = 2;
+        for (let x = x1 - h; x < x2; x += 7) {
+          g.beginPath();
+          g.moveTo(x, top + h);
+          g.lineTo(x + h, top);
+          g.stroke();
+        }
+        g.restore();
+      }
+    }
+
+    if (this.lanes.length > 1) {
+      g.font = '600 11px system-ui, sans-serif';
+      g.textBaseline = 'middle';
+      g.fillStyle = color('--fg');
+      g.fillText(lane.label, 6, top + h / 2 + 1);
+    }
+  }
+
+  drawTicks(g, W, track, muted) {
     const [a, b] = this.viewport;
     const perPixel = (b - a) / W;
     const step = TICK_STEPS.find((s) => s / perPixel >= 80) ?? DAY;
@@ -291,14 +335,14 @@ class Timeline {
     g.textBaseline = 'top';
     for (; t <= b; t += step) {
       const x = Math.round(this.xAt(t));
-      g.fillRect(x, TRACK, 1, 4);
+      g.fillRect(x, track, 1, 4);
       const date = new Date(t);
       const midnight = date.getHours() === 0 && date.getMinutes() === 0;
       const text = midnight || step >= DAY
         ? date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
         : date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
       const width = g.measureText(text).width;
-      g.fillText(text, Math.min(Math.max(x - width / 2, 0), W - width), TRACK + 6);
+      g.fillText(text, Math.min(Math.max(x - width / 2, 0), W - width), track + 6);
     }
   }
 }

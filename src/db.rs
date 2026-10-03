@@ -413,6 +413,8 @@ pub struct StreamSummary {
     pub status_at: Option<i64>,
     pub segments: i64,
     pub bytes: i64,
+    /// Wall-clock time actually recorded: the sum of segment spans, so gaps don't count.
+    pub recorded_ms: i64,
     pub first_wall: Option<i64>,
     pub last_wall: Option<i64>,
 }
@@ -421,6 +423,7 @@ pub async fn stream_summaries(pool: &SqlitePool) -> Result<Vec<StreamSummary>> {
     Ok(sqlx::query_as(
         "SELECT s.id, s.label, s.url, s.enabled, s.live_only, s.settings, s.max_bytes, s.max_duration_secs, \
          s.status, s.status_detail, s.status_at, COUNT(g.id) AS segments, COALESCE(SUM(g.bytes), 0) AS bytes, \
+         COALESCE(SUM(g.wall_end - g.wall_start), 0) AS recorded_ms, \
          MIN(g.wall_start) AS first_wall, MAX(g.wall_end) AS last_wall \
          FROM streams s LEFT JOIN segments g ON g.stream_id = s.id AND g.state = 'ready' \
          GROUP BY s.id ORDER BY s.id",

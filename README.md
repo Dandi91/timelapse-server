@@ -13,7 +13,13 @@ the database. If a pipeline drops, it restarts with backoff in a new session.
   readout. The timeline under it shows footage and gaps in clock time. You can scroll to zoom,
   drag to pan, click to jump, and shift-drag to select a clip. Hovering shows the time and a
   thumbnail. Live mode follows new segments as they finish; it shows how far behind real time the
-  picture is, and the stretch still being recorded.
+  picture is, and the stretch still being recorded. Fullscreen covers the whole player, so the
+  clock and timeline come along. Keys: space plays and pauses, ←/→ jump 5 s of video (30 s with
+  shift), `,`/`.` step one frame, and `f` toggles fullscreen.
+- **Wall.** Up to four cameras side by side, all following one clock. Each camera keeps to the
+  clock, even across different recording speeds. A camera without footage at that moment shows
+  when its footage resumes. The timeline has one lane per camera. One selection can queue an
+  export for every camera.
 - **Exports.** Pick a range under the player (or mark it from the playback position) and export it
   as an mp4. Fast mode copies the video, so it takes seconds, and starts at the keyframe before
   the requested time. Exact mode re-encodes and cuts to the frame. A range that spans different

@@ -47,6 +47,11 @@ async fn serves_playable_playlists_across_sessions() {
     let streams: serde_json::Value = get("/api/streams".into()).await.json().await.unwrap();
     assert_eq!(streams[0]["label"], "cam");
     assert!(streams[0]["segments"].as_i64().unwrap() >= segments.len() as i64);
+    let spans: i64 = segments.iter().map(|s| s.wall_end - s.wall_start).sum();
+    assert!(
+        streams[0]["recorded_ms"].as_i64().unwrap() >= spans,
+        "recorded time is the sum of segment spans"
+    );
 
     let listed: Vec<serde_json::Value> = get(format!("/api/streams/{}/segments?{range}", stream.id))
         .await
