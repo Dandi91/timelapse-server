@@ -36,10 +36,15 @@ function message(text) {
 
 // --- clock -------------------------------------------------------------------------------------
 
-/** Wall-clock ms per real second: the first camera's speedup at 1×, times the speed setting. */
+/**
+ * Wall-clock ms per real second. At 1× the clock runs at the speed of the footage it is showing:
+ * that of the first camera with footage at the clock's time (cameras may record at different
+ * speeds, and a camera's speed may change over its history).
+ */
 function wallPerSecond() {
-  const first = tiles.find((t) => t.cam.loaded);
-  return (first ? first.cam.wallPerVideoSecond : 6000) * clock.rate;
+  const reference = tiles.find((t) => t.cam.loaded && t.cam.hasFootageAt(clock.wall, GAP_SLACK))
+    ?? tiles.find((t) => t.cam.loaded);
+  return (reference ? reference.cam.speedAt(clock.wall) : 6000) * clock.rate;
 }
 
 /** Tiles with footage at the clock's time. */
@@ -101,7 +106,8 @@ function sync() {
     if (!video.seeking && (Math.abs(drift) > MAX_DRIFT || (!playing && Math.abs(drift) > 0.05))) {
       video.currentTime = target;
     }
-    const nominal = wallPerSecond() / cam.wallPerVideoSecond;
+    // The footage under the clock sets this camera's pace, not its current settings.
+    const nominal = wallPerSecond() / cam.speedAt(clock.wall);
     const nudge = Math.min(Math.max(-drift / 2, -MAX_NUDGE), MAX_NUDGE);
     const rate = Math.min(Math.max(nominal * (1 + nudge), 0.0625), 16);
     if (Math.abs(video.playbackRate - rate) > 0.005) video.playbackRate = rate;
@@ -184,7 +190,7 @@ const controls = setUpControls({
   actions: {
     isPlaying: () => clock.playing,
     toggle: () => setPlaying(!clock.playing),
-    // Video seconds of the first camera, as the player does.
+    // Video seconds of the footage showing, as the player does.
     jump: (seconds) => seekClock(clock.wall + seconds * (wallPerSecond() / clock.rate)),
     step: (frames) => {
       setPlaying(false);

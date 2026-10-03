@@ -167,10 +167,21 @@ class CamPlayer {
     return this.segments.find((s) => s.wall_start > ms)?.wall_start ?? null;
   }
 
-  /** Wall-clock ms per second of video: the stream's speedup. */
+  /** Wall-clock ms per second of video with the stream's current settings. */
   get wallPerVideoSecond() {
     const s = this.stream?.settings;
     return s ? (1000 * s.out_fps) / s.sample_fps : 6000;
+  }
+
+  /**
+   * Wall-clock ms per second of video in the footage at wall-clock `ms` (or the next footage).
+   * Taken from the segment itself, not the stream's settings: footage recorded before a change
+   * of speed keeps its own.
+   */
+  speedAt(ms) {
+    const seg = this.segments.find((s) => s.wall_end > ms) ?? this.segments[this.segments.length - 1];
+    const ratio = seg && seg.media_dur > 0 ? (seg.wall_end - seg.wall_start) / seg.media_dur : 0;
+    return ratio > 0 ? ratio : this.wallPerVideoSecond;
   }
 
   /** The wall-clock time now showing. */
