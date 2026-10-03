@@ -6,6 +6,8 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs && touch src/lib.rs \
     && cargo build --release --locked && rm -rf src
 COPY migrations migrations
 COPY src src
+# Embedded into the binary by rust-embed at compile time.
+COPY ui ui
 # touch: the stub's build is newer than the real sources' copied mtimes.
 RUN touch src/main.rs src/lib.rs && cargo build --release --locked \
     && cp target/release/timelapse-server /timelapse-server
