@@ -95,7 +95,9 @@ function attach(url, startPosition, onPlaylist) {
   if (hls) hls.destroy();
   hls = null;
   if (window.Hls && Hls.isSupported()) {
-    hls = new Hls({ startPosition });
+    // Segments are large (a 10-minute segment at 1080p is ~50 MB). Appending one in a single
+    // piece stalls playback for a moment; progressive mode appends while it downloads.
+    hls = new Hls({ startPosition, progressive: true });
     hls.on(Hls.Events.ERROR, (_, data) => {
       if (data.fatal) message(`Playback error: ${data.details}`);
     });
