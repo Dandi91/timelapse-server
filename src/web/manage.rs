@@ -5,7 +5,6 @@
 
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -13,12 +12,11 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
-use tokio::sync::Mutex;
 
 use super::AppError;
 use crate::db::{self, StreamConfig};
 use crate::settings::EncodeSettings;
-use crate::{Ctx, retention, server};
+use crate::{Ctx, retention, tools};
 
 /// Fields to set on a stream; absent ones stay as they are. `settings` may name only some
 /// settings. A limit given as `null` is removed.
@@ -200,6 +198,14 @@ pub struct SystemInfo {
     /// The free-space guard: below this, the oldest segments go.
     min_free_bytes: u64,
     versions: crate::ToolVersions,
+    yt_dlp_update: UpdateSchedule,
+}
+
+#[derive(Serialize)]
+struct UpdateSchedule {
+    /// None: automatic updates are off.
+    every_hours: Option<f64>,
+    last: Option<tools::UpdateOutcome>,
 }
 
 pub async fn system(State(ctx): State<Arc<Ctx>>) -> Result<Response, AppError> {
@@ -212,37 +218,20 @@ pub async fn system(State(ctx): State<Arc<Ctx>>) -> Result<Response, AppError> {
         disk_total_bytes: total,
         min_free_bytes: ctx.tuning.min_free_bytes,
         versions,
+        yt_dlp_update: UpdateSchedule {
+            every_hours: ctx.tuning.yt_dlp_update.map(|d| d.as_secs_f64() / 3600.0),
+            last: ctx.last_update.read().unwrap_or_else(|e| e.into_inner()).clone(),
+        },
     })
     .into_response())
 }
 
-static UPDATING: Mutex<()> = Mutex::const_new(());
-
-/// Run `yt-dlp -U`. Works when yt-dlp is the standalone build in a writable place, as in the
-/// Docker image. Running pipelines keep the old version until they restart.
+/// Run `yt-dlp -U` now. Running pipelines keep their stream; new attempts use the new version.
 pub async fn update_yt_dlp(State(ctx): State<Arc<Ctx>>) -> Result<Response, AppError> {
-    let Ok(_guard) = UPDATING.try_lock() else {
-        return Err(AppError::Conflict("an update is already running".into()));
-    };
-    let run = tokio::process::Command::new(&ctx.tools.yt_dlp)
-        .args(["-U", "--no-colors"])
-        .kill_on_drop(true)
-        .output();
-    let (ok, output) = match tokio::time::timeout(Duration::from_secs(180), run).await {
-        Ok(Ok(out)) => {
-            let text = format!(
-                "{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            );
-            (out.status.success(), text)
-        }
-        Ok(Err(e)) => (false, format!("could not run {}: {e}", ctx.tools.yt_dlp.display())),
-        Err(_) => (false, "yt-dlp -U did not finish within 3 minutes".into()),
-    };
-    server::refresh_tool_versions(&ctx).await;
-    let version = ctx.versions.read().unwrap_or_else(|e| e.into_inner()).yt_dlp.clone();
-    Ok(Json(serde_json::json!({ "ok": ok, "output": output.trim(), "version": version })).into_response())
+    let outcome = tools::update_yt_dlp(&ctx, false)
+        .await
+        .ok_or_else(|| AppError::Conflict("an update is already running".into()))?;
+    Ok(Json(outcome).into_response())
 }
 
 #[cfg(test)]

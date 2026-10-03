@@ -39,6 +39,9 @@ enum Command {
         /// Password for the web UI. Without one, anyone who can reach `--bind` can manage streams.
         #[arg(long, env = "TIMELAPSE_PASSWORD", hide_env_values = true)]
         password: Option<String>,
+        /// How often yt-dlp updates itself, in hours; 0 turns that off.
+        #[arg(long, env = "TIMELAPSE_YT_DLP_UPDATE_HOURS", default_value_t = 24.0)]
+        yt_dlp_update_hours: f64,
         /// Prune the oldest segments across all streams when free space drops below this.
         #[arg(long, env = "TIMELAPSE_MIN_FREE", default_value = "5G", value_parser = parse_size)]
         min_free: i64,
@@ -175,6 +178,7 @@ async fn main() -> Result<()> {
         Command::Serve {
             bind,
             password,
+            yt_dlp_update_hours,
             min_free,
         } => {
             let listener = tokio::net::TcpListener::bind(&bind)
@@ -187,6 +191,8 @@ async fn main() -> Result<()> {
             };
             let tuning = Tuning {
                 min_free_bytes: min_free as u64,
+                yt_dlp_update: (yt_dlp_update_hours > 0.0)
+                    .then(|| Duration::from_secs_f64(yt_dlp_update_hours * 3600.0)),
                 ..Tuning::default()
             };
             let mut ctx = Ctx::new(pool.clone(), data_dir, tools, tuning);

@@ -73,6 +73,7 @@ Global options are also available as environment variables:
 | `--min-free` (serve only) | `TIMELAPSE_MIN_FREE` | 5G; below this, the oldest segments across all streams are pruned |
 | `--bind` (serve only) | `TIMELAPSE_BIND` | `127.0.0.1:8080` (`0.0.0.0:8080` in the Docker image) |
 | `--password` (serve only) | `TIMELAPSE_PASSWORD` | none: no login |
+| `--yt-dlp-update-hours` (serve only) | `TIMELAPSE_YT_DLP_UPDATE_HOURS` | 24; how often yt-dlp updates itself (`0` turns that off) |
 
 ### HTTP API
 
@@ -88,14 +89,14 @@ Once a password is set, everything except the login page needs the session cooki
 | `POST /api/streams/{id}/restart` | restart its pipeline |
 | `GET /api/streams/{id}/log?lines=` | the end of its capture log |
 | `GET /api/system` | disk usage, the free-space minimum, tool versions |
-| `POST /api/system/update-yt-dlp` | run `yt-dlp -U` |
+| `POST /api/system/update-yt-dlp` | run `yt-dlp -U` now (it also runs on a schedule) |
 | `GET /api/exports` | export jobs, newest first |
 | `POST /api/exports` | queue one: `{stream_id, from, to, mode: "fast" \| "exact"}` (wall-clock unix ms) |
 | `DELETE /api/exports/{id}` | cancel or delete a job, and its file |
 | `GET /api/exports/{id}/file` | the finished mp4, as a download |
 | `GET /api/events` | server-sent events: status changes, segments added and removed, stream and export changes |
 | `GET /api/streams/{id}/segments?from=&to=` | segments overlapping a wall-clock range (unix ms, either end optional) |
-| `GET /streams/{id}/playlist.m3u8?from=&to=` | HLS VOD playlist for the range; sessions are separated by discontinuities |
+| `GET /streams/{id}/playlist.m3u8?from=&to=` | HLS VOD playlist for the range: each segment as keyframe byte ranges (about 5 s each), sessions separated by discontinuities |
 | `GET /streams/{id}/playlist.m3u8?live=1&from=` | growing HLS EVENT playlist |
 | `GET /streams/{id}/{session}/{n}.ts` | segment files, relative to the playlist |
 
@@ -109,6 +110,10 @@ data/streams/<stream>/<session>/000000.jpg keyframe thumbnails of that segment, 
 data/exports/<id>.mp4                     finished exports
 ```
 
+Each finished segment is post-processed in the background, newest first. Its keyframes are
+indexed so playlists can list it as byte ranges, and a player then fetches about 2 MB to show a
+frame instead of the whole 50 MB segment. Its thumbnails are made as well.
+
 At startup the server reconciles this directory with the database:
 - It winds down any pipeline a crashed server left running, letting it finish its segment.
 - It adopts segment files that aren't indexed.
@@ -117,8 +122,10 @@ At startup the server reconciles this directory with the database:
 ## Docker
 
 The image bundles ffmpeg, the latest yt-dlp at build time, and deno, which yt-dlp needs for
-YouTube. CI publishes it to `ghcr.io/dandi91/timelapse-server`. A weekly rebuild keeps yt-dlp
-current.
+YouTube. CI publishes it to `ghcr.io/dandi91/timelapse-server`. Inside the container, yt-dlp
+updates itself daily (see `--yt-dlp-update-hours`), and a weekly image rebuild refreshes it too.
+Running recordings aren't interrupted: each pipeline picks up the new version the next time it
+starts.
 
 ```sh
 docker pull ghcr.io/dandi91/timelapse-server:latest

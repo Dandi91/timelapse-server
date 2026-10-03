@@ -71,6 +71,7 @@ pub async fn fixture_ctx(fetcher_script: &str) -> (Ctx, TempDir) {
         poll_interval: Duration::from_millis(200),
         retention_interval: Duration::from_millis(500),
         min_free_bytes: 0,
+        yt_dlp_update: None,
     };
     (Ctx::new(pool, data_dir, tools, tuning), dir)
 }

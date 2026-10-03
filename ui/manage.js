@@ -283,6 +283,21 @@ async function refreshSystem() {
   $('#disk-text').classList.toggle('error', low);
   const v = system.versions;
   $('#versions').textContent = `yt-dlp ${v.yt_dlp ?? '?'} · ${(v.ffmpeg ?? 'ffmpeg ?').replace(/ Copyright.*/, '')}`;
+  $('#update-schedule').textContent = describeUpdates(system.yt_dlp_update);
+  // What yt-dlp said, on hover.
+  $('#update-schedule').title = system.yt_dlp_update.last?.output ?? '';
+}
+
+/** "updates itself every 24 h · last check 3 h ago: up to date". */
+function describeUpdates({ every_hours: every, last }) {
+  const schedule = every ? `updates itself every ${every < 1 ? `${Math.round(every * 60)} min` : `${+every.toFixed(1)} h`}` : 'automatic updates off';
+  if (!last) return `· ${schedule}`;
+  const ago = formatDuration(Math.max((Date.now() - last.at) / 1000, 60));
+  let result;
+  if (!last.ok) result = 'failed (hover for details)';
+  else if (last.before && last.after && last.before !== last.after) result = `updated ${last.before} → ${last.after}`;
+  else result = 'up to date';
+  return `· ${schedule} · last check ${ago} ago: ${result}`;
 }
 
 $('#update-yt-dlp').addEventListener('click', async (event) => {
@@ -293,7 +308,7 @@ $('#update-yt-dlp').addEventListener('click', async (event) => {
   try {
     const result = await api('api/system/update-yt-dlp', { method: 'POST' });
     output.textContent = result.output +
-      (result.ok ? '\n\nRunning recorders keep the old version until restarted.' : '');
+      (result.ok ? '\n\nRecorders pick up the new version the next time their pipeline starts.' : '');
   } catch (error) {
     output.textContent = error.message;
   } finally {

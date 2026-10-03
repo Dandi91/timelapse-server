@@ -1,7 +1,9 @@
 pub mod db;
 pub mod events;
 pub mod exports;
+pub mod parts;
 pub mod pipeline;
+pub mod postprocess;
 pub mod procs;
 pub mod reconcile;
 pub mod retention;
@@ -9,6 +11,7 @@ pub mod server;
 pub mod settings;
 pub mod supervisor;
 pub mod thumbs;
+pub mod tools;
 pub mod units;
 pub mod web;
 
@@ -36,6 +39,8 @@ pub struct Tuning {
     pub retention_interval: Duration,
     /// Prune the oldest segments, across all streams, when free disk space drops below this.
     pub min_free_bytes: u64,
+    /// How often yt-dlp updates itself; None turns that off.
+    pub yt_dlp_update: Option<Duration>,
 }
 
 impl Default for Tuning {
@@ -48,6 +53,7 @@ impl Default for Tuning {
             poll_interval: Duration::from_secs(5),
             retention_interval: Duration::from_secs(60),
             min_free_bytes: 5 << 30,
+            yt_dlp_update: Some(Duration::from_secs(24 * 3600)),
         }
     }
 }
@@ -72,9 +78,11 @@ pub struct Ctx {
     /// Wakes the recorder manager to reread the stream table now rather than at the next poll.
     pub wake: Notify,
     pub versions: RwLock<ToolVersions>,
+    /// The last yt-dlp update, scheduled or requested.
+    pub last_update: RwLock<Option<tools::UpdateOutcome>>,
     pub exports: exports::Control,
-    /// Wakes the thumbnail worker when a segment is finished.
-    pub thumbs_wake: Notify,
+    /// Wakes the post-processing worker when a segment is finished.
+    pub segment_finished: Notify,
 }
 
 impl Ctx {
@@ -88,8 +96,9 @@ impl Ctx {
             events: broadcast::channel(256).0,
             wake: Notify::new(),
             versions: RwLock::default(),
+            last_update: RwLock::default(),
             exports: exports::Control::default(),
-            thumbs_wake: Notify::new(),
+            segment_finished: Notify::new(),
         }
     }
 

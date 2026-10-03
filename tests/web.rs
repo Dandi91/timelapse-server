@@ -14,7 +14,12 @@ async fn serves_playable_playlists_across_sessions() {
     // The source ends after 36 s of stream and the recorder restarts it, so footage piles up in
     // several sessions with a discontinuity between each.
     let f = fixture(&pattern_source(36, false)).await;
-    let stream = add_stream(&f.ctx, "cam").await;
+    let created = add_stream(&f.ctx, "cam").await;
+    // 18 s of stream per segment: 3 s of video, a keyframe each second, so three parts each.
+    let mut config = created.config();
+    config.settings.segment_minutes = 0.3;
+    db::update_stream(&f.ctx.pool, &created, &config).await.unwrap();
+    let stream = db::find_stream(&f.ctx.pool, "cam").await.unwrap().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let shutdown = CancellationToken::new();
@@ -32,9 +37,26 @@ async fn serves_playable_playlists_across_sessions() {
     })
     .await;
     assert!(two_sessions, "no second session within 30 s");
-    // Pin the range so recording that goes on meanwhile doesn't change what we compare.
-    let segments = db::list_segments(&f.ctx.pool, stream.id).await.unwrap();
-    let to = segments.last().unwrap().wall_end;
+    // Pin the range so recording that goes on meanwhile doesn't change what we compare, and let
+    // post-processing index what is in it.
+    let to = db::list_segments(&f.ctx.pool, stream.id)
+        .await
+        .unwrap()
+        .last()
+        .unwrap()
+        .wall_end;
+    let indexed = wait_for(Duration::from_secs(30), || async {
+        db::segments_in_range(&pool, stream.id, None, Some(to))
+            .await
+            .unwrap()
+            .iter()
+            .all(|s| s.parts.is_some())
+    })
+    .await;
+    assert!(indexed, "segments never got indexed");
+    let segments = db::segments_in_range(&f.ctx.pool, stream.id, None, Some(to))
+        .await
+        .unwrap();
     let range = format!("from=0&to={to}");
 
     let http = reqwest::Client::new();
@@ -65,9 +87,43 @@ async fn serves_playable_playlists_across_sessions() {
     let playlist = response.text().await.unwrap();
     assert!(playlist.contains("#EXT-X-DISCONTINUITY"), "{playlist}");
     assert!(playlist.ends_with("#EXT-X-ENDLIST\n"));
-    assert_eq!(playlist.matches("#EXTINF").count(), segments.len());
+    // One entry per keyframe part.
+    let parts: usize = segments.iter().map(|s| s.parts.as_ref().unwrap().0.len().max(1)).sum();
+    assert!(
+        parts >= 2 * segments.len(),
+        "{parts} parts in {} segments",
+        segments.len()
+    );
+    assert_eq!(playlist.matches("#EXTINF").count(), parts);
+    assert_eq!(playlist.matches("#EXT-X-BYTERANGE").count(), parts);
 
-    // Every URI resolves next to the playlist and serves the file as recorded.
+    // Every range is served on its own and starts with the stream tables (SDT or PAT).
+    let lines: Vec<&str> = playlist.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(range) = line.strip_prefix("#EXT-X-BYTERANGE:") else {
+            continue;
+        };
+        let (length, offset): (u64, u64) = {
+            let (l, o) = range.split_once('@').unwrap();
+            (l.parse().unwrap(), o.parse().unwrap())
+        };
+        let response = http
+            .get(format!("{base}/streams/{}/{}", stream.id, lines[i + 1]))
+            .header("range", format!("bytes={offset}-{}", offset + length - 1))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 206);
+        let body = response.bytes().await.unwrap();
+        assert_eq!(body.len() as u64, length);
+        let pid = (u16::from(body[1] & 0x1f) << 8) | u16::from(body[2]);
+        assert!(
+            body[0] == 0x47 && (pid == 0x0 || pid == 0x11),
+            "range {range} starts with pid {pid:#x}"
+        );
+    }
+
+    // The files themselves are still there whole.
     let first_uri = playlist.lines().find(|l| l.ends_with(".ts")).unwrap();
     let body = get(format!("/streams/{}/{first_uri}", stream.id))
         .await
@@ -76,7 +132,7 @@ async fn serves_playable_playlists_across_sessions() {
         .unwrap();
     assert_eq!(body.len() as i64, segments[0].bytes);
 
-    // A real HLS client plays the whole thing, discontinuities included.
+    // A real HLS client plays the whole thing from byte ranges, discontinuities included.
     let url = format!("{base}/streams/{}/playlist.m3u8?{range}", stream.id);
     let played = tokio::process::Command::new("ffmpeg")
         .args(["-hide_banner", "-loglevel", "error", "-i", &url, "-f", "null", "-"])

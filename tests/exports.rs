@@ -75,14 +75,14 @@ async fn setup(slow_exports: bool) -> Setup {
     let base = format!("http://{}", listener.local_addr().unwrap());
     let shutdown = CancellationToken::new();
     let server = tokio::spawn(server::serve(ctx.clone(), shutdown.clone(), Some(listener)));
-    // The thumbnail worker leases each segment briefly; let it finish so leases are the exports'.
+    // Post-processing leases each segment briefly; let it finish so leases are the exports'.
     let pool = ctx.pool.clone();
     let thumbnailed = wait_for(Duration::from_secs(30), || async {
         db::list_segments(&pool, stream.id)
             .await
             .unwrap()
             .iter()
-            .all(|s| s.thumbs.is_some())
+            .all(|s| s.thumbs.is_some() && s.parts.is_some())
     })
     .await;
     assert!(thumbnailed, "thumbnails never finished");

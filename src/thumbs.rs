@@ -1,18 +1,15 @@
 //! Keyframe thumbnails: one sprite per segment, a tile per keyframe, for previews on the timeline.
 //!
 //! Only keyframes are decoded, so a 100 s 1080p segment takes about a second and makes an 80 KB
-//! image. One worker makes them, newest segment first, so a backlog after an upgrade fills in
-//! from the present backwards without competing much with recording.
+//! image. The post-processing worker makes them.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
 use tokio::process::Command;
-use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
 
-use crate::{Ctx, db};
+use crate::Ctx;
 
 /// Tile size; 16:9 at the height the timeline shows them.
 pub const WIDTH: u32 = 160;
@@ -75,48 +72,6 @@ pub async fn make(ctx: &Ctx, segment: &Path, tiles: u32) -> Result<()> {
     }
     std::fs::rename(&partial, &sprite)?;
     Ok(())
-}
-
-/// Make sprites for every segment without one, newest first. Returns how many were attempted.
-pub async fn run_pending(ctx: &Ctx, stop: &CancellationToken) -> Result<usize> {
-    let mut done = 0;
-    while !stop.is_cancelled() {
-        let Some(next) = db::next_unthumbed(&ctx.pool).await? else {
-            break;
-        };
-        // While leased, retention leaves the segment alone, so its sprite can't be orphaned.
-        db::lease_segment(&ctx.pool, next.id, "thumbnails").await?;
-        let interval = next.settings.0.keyframe_seconds as f64;
-        let tiles = tile_count(next.media_dur, interval);
-        let made = make(ctx, &ctx.absolute(&next.path), tiles).await;
-        db::release_lease(&ctx.pool, next.id, "thumbnails").await?;
-        match made {
-            Ok(()) => db::set_thumbs(&ctx.pool, next.id, tiles as i64, interval).await?,
-            Err(e) => {
-                // Marked, so a segment ffmpeg can't read isn't retried forever.
-                warn!("thumbnails for {}: {e:#}", next.path);
-                db::set_thumbs(&ctx.pool, next.id, 0, interval).await?;
-            }
-        }
-        done += 1;
-    }
-    Ok(done)
-}
-
-/// Background worker: woken whenever a segment is finished.
-pub async fn worker(ctx: std::sync::Arc<Ctx>, shutdown: CancellationToken) {
-    loop {
-        match run_pending(&ctx, &shutdown).await {
-            Ok(n) if n > 1 => info!("made thumbnails for {n} segments"),
-            Ok(_) => {}
-            Err(e) => warn!("thumbnail worker: {e:#}"),
-        }
-        tokio::select! {
-            _ = shutdown.cancelled() => return,
-            _ = ctx.thumbs_wake.notified() => {}
-            _ = tokio::time::sleep(Duration::from_secs(300)) => {}
-        }
-    }
 }
 
 #[cfg(test)]

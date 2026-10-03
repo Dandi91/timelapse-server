@@ -2,9 +2,7 @@
 //! database, and run retention in the background.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
 use tokio::net::TcpListener;
@@ -15,7 +13,7 @@ use tracing::{error, info, warn};
 
 use crate::db::{self, Stream};
 use crate::events::Event;
-use crate::{Ctx, ToolVersions, exports, reconcile, retention, supervisor, thumbs, web};
+use crate::{Ctx, exports, postprocess, reconcile, retention, supervisor, tools, web};
 
 struct Recorder {
     revision: i64,
@@ -29,7 +27,7 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<
     exports::recover(&ctx).await?;
     {
         let ctx = ctx.clone();
-        tokio::spawn(async move { refresh_tool_versions(&ctx).await });
+        tokio::spawn(async move { tools::refresh_versions(&ctx).await });
     }
 
     let http = listener.map(|listener| {
@@ -50,7 +48,8 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<
 
     let retention = tokio::spawn(retention_loop(ctx.clone(), shutdown.clone()));
     let exporter = tokio::spawn(exports::worker(ctx.clone(), shutdown.clone()));
-    let thumbnailer = tokio::spawn(thumbs::worker(ctx.clone(), shutdown.clone()));
+    let postprocessor = tokio::spawn(postprocess::worker(ctx.clone(), shutdown.clone()));
+    let updater = tokio::spawn(tools::auto_update(ctx.clone(), shutdown.clone()));
     let mut recorders: HashMap<i64, Recorder> = HashMap::new();
     let mut seen = None;
     loop {
@@ -83,7 +82,8 @@ pub async fn serve(ctx: Arc<Ctx>, shutdown: CancellationToken, listener: Option<
     }
     let _ = retention.await;
     let _ = exporter.await;
-    let _ = thumbnailer.await;
+    let _ = postprocessor.await;
+    let _ = updater.await;
     if let Some(http) = http {
         let _ = http.await;
     }
@@ -166,32 +166,4 @@ fn fingerprint(streams: &[Stream]) -> Vec<(i64, i64, String)> {
         .iter()
         .map(|s| (s.id, s.revision, format!("{:?}", s.config())))
         .collect()
-}
-
-/// A stale yt-dlp is the usual cause of 403s on YouTube, so make its version visible, in the log and
-/// the UI. Bounded by a timeout: a hung tool must not hold anything up.
-pub async fn refresh_tool_versions(ctx: &Ctx) {
-    let yt_dlp = tool_version(&ctx.tools.yt_dlp, "--version").await;
-    let ffmpeg = tool_version(&ctx.tools.ffmpeg, "-version").await;
-    *ctx.versions.write().unwrap_or_else(|e| e.into_inner()) = ToolVersions { yt_dlp, ffmpeg };
-}
-
-async fn tool_version(tool: &Path, flag: &str) -> Option<String> {
-    let probe = tokio::process::Command::new(tool).arg(flag).kill_on_drop(true).output();
-    match tokio::time::timeout(Duration::from_secs(30), probe).await {
-        Ok(Ok(out)) => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            let version = text.lines().next().unwrap_or("").trim().to_string();
-            info!("{}: {version}", tool.display());
-            Some(version)
-        }
-        Ok(Err(e)) => {
-            warn!("{} is not runnable: {e}", tool.display());
-            None
-        }
-        Err(_) => {
-            warn!("{} {flag} did not answer within 30 s", tool.display());
-            None
-        }
-    }
 }

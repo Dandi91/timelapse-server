@@ -1,4 +1,5 @@
-//! Keyframe thumbnail sprites: made, kept, cleaned up with their segments.
+//! Post-processing of finished segments: the keyframe index and the thumbnail sprite, made, kept
+//! and cleaned up with their segments.
 
 mod common;
 
@@ -7,7 +8,7 @@ use std::time::Duration;
 
 use common::*;
 use timelapse_server::db::{self, NewSegment};
-use timelapse_server::{reconcile, retention, server, supervisor, thumbs};
+use timelapse_server::{postprocess, reconcile, retention, server, supervisor, thumbs};
 use tokio_util::sync::CancellationToken;
 
 async fn dimensions(path: &Path) -> (u32, u32) {
@@ -54,10 +55,14 @@ async fn sprites_have_a_tile_per_keyframe_and_follow_their_segments() {
     .await
     .unwrap();
 
-    let made = thumbs::run_pending(&f.ctx, &CancellationToken::new()).await.unwrap();
+    let made = postprocess::run_pending(&f.ctx, &CancellationToken::new())
+        .await
+        .unwrap();
     assert_eq!(made, report.segments + 1);
     assert_eq!(
-        thumbs::run_pending(&f.ctx, &CancellationToken::new()).await.unwrap(),
+        postprocess::run_pending(&f.ctx, &CancellationToken::new())
+            .await
+            .unwrap(),
         0,
         "nothing left to do"
     );
@@ -74,10 +79,34 @@ async fn sprites_have_a_tile_per_keyframe_and_follow_their_segments() {
         let sprite = thumbs::sprite_path(&f.ctx.absolute(&seg.path));
         assert_eq!(dimensions(&sprite).await, (tiles * thumbs::WIDTH, 90));
     }
-    // Full segments hold 3 s of video: a keyframe, so a tile, per second.
+    // Full segments hold 3 s of video: a keyframe, so a tile and an indexed part, per second.
     assert_eq!(segments[1].thumbs, Some(3));
+    for seg in segments.iter().filter(|s| s.seq != 99) {
+        let parts = &seg.parts.as_ref().expect("indexed").0;
+        assert_eq!(parts.len() as i64, seg.thumbs.unwrap(), "{}", seg.path);
+        assert_eq!(parts[0].offset, 0);
+        assert!(
+            parts
+                .windows(2)
+                .all(|w| w[0].offset < w[1].offset && (w[1].time - w[0].time - 1.0).abs() < 0.01)
+        );
+        let data = std::fs::read(f.ctx.absolute(&seg.path)).unwrap();
+        for part in parts {
+            let at = part.offset as usize;
+            let pid = (u16::from(data[at + 1] & 0x1f) << 8) | u16::from(data[at + 2]);
+            assert!(
+                data[at] == 0x47 && (pid == 0x0 || pid == 0x11),
+                "part at {at} starts with pid {pid:#x}"
+            );
+        }
+    }
     let junk = segments.iter().find(|s| s.seq == 99).unwrap();
     assert_eq!(junk.thumbs, Some(0));
+    assert_eq!(
+        junk.parts.as_ref().map(|p| p.0.len()),
+        Some(0),
+        "unreadable: served whole"
+    );
     assert!(!thumbs::sprite_path(&junk_path).exists());
     assert!(
         !junk_path.with_extension("jpg.part").exists(),

@@ -83,9 +83,13 @@ class CamPlayer {
 
   attach(url, startPosition) {
     // The segment list must cover everything the player can reach, or the wall clock would stall
-    // on footage it doesn't know; so it is refreshed whenever a live playlist grows.
+    // on footage it doesn't know; so it is refreshed whenever a live playlist grows. (Entries are
+    // keyframe parts, not segments, so only a change in their number says anything.)
+    let fragments = null;
     const onPlaylist = (count) => {
-      if (this.live && (count === null || count > this.segments.length)) this.refresh();
+      if (!this.live) return;
+      if (count === null || (fragments !== null && count !== fragments)) this.refresh();
+      fragments = count;
     };
     if (window.Hls && Hls.isSupported()) {
       // Segments are large (a 10-minute segment at 1080p is ~50 MB). Appending one in a single
