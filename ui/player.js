@@ -1,5 +1,6 @@
 // The player page: one camera, a range picker, the timeline, live mode and the export form.
-// A link like `#stream=3&t=1791024466000` opens a stream at a wall-clock time.
+// A link like `#stream=3&t=1791024466000` opens a stream at a wall-clock time; `&sync=1` turns on
+// sync, which plays it in step with the other tabs that have sync on (see sync.js).
 
 const video = $('#video');
 const cam = new CamPlayer(video, { onError: message, onUpdate: drawTimeline });
@@ -7,6 +8,10 @@ const cam = new CamPlayer(video, { onError: message, onUpdate: drawTimeline });
 // While live: extends the timeline to now, so the stretch being recorded grows.
 let liveClock = null;
 let streams = [];
+/** Set while a tab opened with sync on is loading, before it joins: it mustn't start on its own. */
+let syncPending = false;
+
+const sync = new SyncClock({ probe: (wall) => probeCam(cam, wall), onChange: syncChanged });
 
 function message(text) {
   $('#message').textContent = text || '';
@@ -17,6 +22,10 @@ function message(text) {
 const timeline = new Timeline($('#timeline'), {
   thumbUrl,
   onSeek(ms) {
+    if (sync.enabled) {
+      sync.seek(ms, true);
+      return;
+    }
     if (!cam.loaded) return;
     video.currentTime = cam.timeAt(ms);
     video.play().catch(() => {});
@@ -49,10 +58,53 @@ $('#zoom-in').addEventListener('click', () => timeline.zoom(1 / 2));
 $('#zoom-out').addEventListener('click', () => timeline.zoom(2));
 $('#zoom-fit').addEventListener('click', () => timeline.fit());
 
+/** The wall-clock time showing: the shared clock's when in sync, else the video's. */
+function nowShowing() {
+  return sync.enabled ? sync.wall() : cam.loaded ? cam.wall : null;
+}
+
+/** The clock shows the time playing ('time'), or how long it plays until the end ('left'). */
+let clockMode = 'time';
+try { if (localStorage.getItem('clockMode') === 'left') clockMode = 'left'; } catch { /* unavailable */ }
+
+/** Real seconds until the end of the loaded range, at the current speed; gaps don't count. */
+function timeLeft() {
+  if (!cam.loaded) return null;
+  if (sync.enabled) {
+    const wall = sync.wall();
+    return wall == null ? null : cam.footageAfter(wall) / sync.wps;
+  }
+  return Math.max(cam.duration - video.currentTime, 0) / (video.playbackRate || 1);
+}
+
+/** "1:02:03 left", "02:03 left". */
+function formatLeft(seconds) {
+  const s = Math.ceil(seconds);
+  const pad = (n) => String(n).padStart(2, '0');
+  const h = Math.floor(s / 3600);
+  const rest = `${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+  return `${h ? `${h}:${rest}` : rest} left`;
+}
+
+function titleClock() {
+  $('#clock').title = clockMode === 'left' ? 'Click to show the time playing' : 'Click to show how long it plays until the end';
+}
+titleClock();
+
+$('#clock').addEventListener('click', (event) => {
+  clockMode = clockMode === 'left' ? 'time' : 'left';
+  try { localStorage.setItem('clockMode', clockMode); } catch { /* unavailable */ }
+  titleClock();
+  updateClock();
+  // Leave space to play and pause, rather than pressing the clock again.
+  if (event.detail) event.currentTarget.blur();
+});
+
 function updateClock() {
-  if (!cam.loaded) return;
-  const wall = cam.wall;
-  $('#clock').textContent = formatTime(wall);
+  const wall = nowShowing();
+  if (wall == null) return;
+  const left = clockMode === 'left' ? timeLeft() : null;
+  $('#clock').textContent = left == null ? formatTime(wall) : formatLeft(left);
   timeline.setCursor(wall);
   updateLive(wall);
 }
@@ -71,6 +123,10 @@ function updateLive(wall) {
 }
 
 $('#jump-live').addEventListener('click', () => {
+  if (sync.enabled) {
+    sync.seek(cam.wallAt(Math.max(cam.duration - 3, 0)), true);
+    return;
+  }
   video.currentTime = Math.max(cam.duration - 3, 0);
   video.play().catch(() => {});
 });
@@ -83,30 +139,128 @@ const controls = setUpControls({
   fullscreenButton: $('#fullscreen'),
   clickTargets: [video],
   actions: {
-    isPlaying: () => !video.paused,
-    toggle: () => (video.paused ? video.play().catch(() => {}) : video.pause()),
+    isPlaying: () => (sync.enabled ? sync.playing : !video.paused),
+    toggle: () => {
+      if (sync.enabled) sync.playing ? sync.pause() : sync.play();
+      else video.paused ? video.play().catch(() => {}) : video.pause();
+    },
     jump: (seconds) => {
-      if (cam.loaded) video.currentTime = Math.min(Math.max(video.currentTime + seconds, 0), cam.duration);
+      if (sync.enabled) sync.seek(sync.wall() + seconds * clockSpeed());
+      else if (cam.loaded) video.currentTime = Math.min(Math.max(video.currentTime + seconds, 0), cam.duration);
     },
     step: (frames) => {
       if (!cam.loaded) return;
+      const seconds = frames / cam.stream.settings.out_fps;
+      if (sync.enabled) {
+        sync.seek(sync.wall() + seconds * clockSpeed(), false);
+        return;
+      }
       video.pause();
-      video.currentTime = Math.max(video.currentTime + frames / cam.stream.settings.out_fps, 0);
+      video.currentTime = Math.max(video.currentTime + seconds, 0);
     },
   },
 });
+
+/** Wall-clock ms per second of this camera's video at the clock, so jumps match the player's. */
+function clockSpeed() {
+  return cam.loaded ? cam.speedAt(sync.wall()) : sync.wps / sync.rate;
+}
 video.addEventListener('play', controls.refresh);
 video.addEventListener('pause', controls.refresh);
 
-$('#rate').addEventListener('change', (event) => { video.playbackRate = Number(event.target.value); });
-video.addEventListener('ratechange', () => { $('#rate').value = String(video.playbackRate); });
-video.addEventListener('timeupdate', updateClock);
-video.addEventListener('seeked', updateClock);
+$('#rate').addEventListener('change', (event) => {
+  const rate = Number(event.target.value);
+  if (sync.enabled) sync.setRate(rate);
+  else video.playbackRate = rate;
+});
+// In sync the video's rate is steered to the clock; the menu shows the clock's.
+video.addEventListener('ratechange', () => {
+  if (sync.enabled) return;
+  $('#rate').value = String(video.playbackRate);
+  updateClock();
+});
+video.addEventListener('timeupdate', () => { if (!sync.enabled) updateClock(); });
+video.addEventListener('seeked', () => { if (!sync.enabled) updateClock(); });
+
+// --- sync --------------------------------------------------------------------------------------
+
+function showOverlay(text) {
+  $('#overlay').hidden = !text;
+  if (text) $('#overlay').textContent = text;
+}
+
+/** Each frame in sync: keep the video on the clock and show where the clock is. */
+function followFrame() {
+  if (sync.enabled) {
+    showOverlay(followClock(cam, sync));
+    updateClock();
+    const others = sync.tabs - 1;
+    $('#sync-info').textContent = sync.waiting ? 'waiting for footage…'
+      : others ? `in step with ${others} other tab${others === 1 ? '' : 's'}` : 'no other tabs yet';
+  }
+  requestAnimationFrame(followFrame);
+}
+
+function syncChanged() {
+  controls.refresh();
+  $('#rate').value = String(sync.rate);
+}
+
+function setSync(on) {
+  if (on === sync.enabled) return;
+  syncPending = false;
+  if (on) {
+    sync.enable({ wall: cam.loaded ? cam.wall : null, playing: cam.loaded && !video.paused, rate: Number($('#rate').value) });
+  } else {
+    // Carry on from here at the same speed, on its own.
+    const { playing, rate } = sync;
+    sync.disable();
+    showOverlay(null);
+    video.playbackRate = rate;
+    if (playing && cam.loaded) video.play().catch(() => {});
+    else video.pause();
+  }
+  $('#sync').classList.toggle('active', on);
+  $('#sync').setAttribute('aria-pressed', String(on));
+  $('#sync-info').hidden = !on;
+  saveHash();
+  controls.refresh();
+}
+
+/**
+ * After the user picks a range in sync: live moves everyone to the newest footage; any other range
+ * moves the clock to its start, unless the clock is already within it.
+ */
+function placeClock(live) {
+  const wall = sync.wall();
+  if (wall == null || !cam.loaded) return;
+  if (live) sync.seek(cam.wallAt(Math.max(cam.duration - 5, 0)), true);
+  else if (wall < cam.from || wall > cam.newest) sync.seek(cam.from);
+}
+
+$('#sync').addEventListener('click', () => setSync(!sync.enabled));
+
+$('#new-tab').addEventListener('click', () => {
+  // Open the next camera along that has footage, and put this tab in sync with it.
+  const i = streams.indexOf(currentStream());
+  const after = [...streams.slice(i + 1), ...streams.slice(0, i + 1)];
+  const next = after.find((stream) => stream.segments) ?? after[0];
+  window.open(`./#stream=${next?.id ?? ''}&sync=1`, '_blank');
+  setSync(true);
+});
+
+if (!SyncClock.supported) {
+  $('#sync').hidden = true;
+  $('#new-tab').hidden = true;
+}
 
 // --- loading -----------------------------------------------------------------------------------
 
-/** Load a stream for a window; `startAt` is a wall-clock time to begin at. */
-async function open(stream, { from = null, to = null, live = false, startAt = null } = {}) {
+/**
+ * Load a stream for a window; `startAt` is a wall-clock time to begin at. `chosen`: the user picked
+ * this range, so in sync it may move the clock.
+ */
+async function loadStream(stream, { from = null, to = null, live = false, startAt = null } = {}, chosen = false) {
   clearInterval(liveClock);
   message('');
   const found = await cam.load(stream, { from, to, live, startAt });
@@ -118,7 +272,11 @@ async function open(stream, { from = null, to = null, live = false, startAt = nu
     return;
   }
   drawTimeline();
-  video.play().catch(() => {});
+  if (sync.enabled) {
+    if (chosen) placeClock(live);
+  } else if (!syncPending) {
+    video.play().catch(() => {});
+  }
   if (live) {
     liveClock = setInterval(() => {
       cam.to = Date.now();
@@ -153,15 +311,15 @@ function toLocalInput(ms, seconds = false) {
   return date.toISOString().slice(0, seconds ? 19 : 16);
 }
 
-async function showRange(button, startAt = null) {
+async function showRange(button, { startAt = null, chosen = true } = {}) {
   const stream = currentStream();
   if (!stream) return;
   setActive(button);
   const range = button.dataset.range;
   try {
-    if (range === 'all') await open(stream, { startAt });
-    else if (range === 'live') await open(stream, { from: Date.now() - 60 * MINUTE_MS, live: true });
-    else await open(stream, { from: Date.now() - Number(range), to: Date.now(), startAt });
+    if (range === 'all') await loadStream(stream, { startAt }, chosen);
+    else if (range === 'live') await loadStream(stream, { from: Date.now() - 60 * MINUTE_MS, live: true }, chosen);
+    else await loadStream(stream, { from: Date.now() - Number(range), to: Date.now(), startAt }, chosen);
     if (cam.loaded) {
       $('#from').value = toLocalInput(cam.from);
       $('#to').value = toLocalInput(cam.to);
@@ -184,14 +342,19 @@ $('#load-custom').addEventListener('click', async () => {
   }
   setActive($('#load-custom'));
   try {
-    await open(currentStream(), { from, to });
+    await loadStream(currentStream(), { from, to }, true);
   } catch (error) {
     message(String(error));
   }
 });
 
+/** The link to this tab: its stream, and whether it's in sync. */
+function saveHash() {
+  history.replaceState(null, '', `#stream=${$('#stream').value}${sync.enabled ? '&sync=1' : ''}`);
+}
+
 $('#stream').addEventListener('change', () => {
-  history.replaceState(null, '', `#stream=${$('#stream').value}`);
+  saveHash();
   $('#stream-info').textContent = describe(currentStream());
   showRange(document.querySelector('.ranges button[data-range="all"]'));
 });
@@ -216,7 +379,9 @@ async function init() {
   select.value = String(initial.id);
   $('#stream-info').textContent = describe(initial);
   const startAt = Number(params.get('t')) || null;
-  await showRange(document.querySelector('.ranges button[data-range="all"]'), startAt);
+  syncPending = params.get('sync') === '1' && SyncClock.supported;
+  await showRange(document.querySelector('.ranges button[data-range="all"]'), { startAt, chosen: false });
+  if (syncPending) setSync(true);
 }
 
 /** Keep the status line current; stream list changes are picked up on the next page load. */
@@ -231,8 +396,9 @@ function onEvent(event) {
 // --- export ------------------------------------------------------------------------------------
 
 function markExport(input) {
-  if (!cam.loaded) return;
-  input.value = toLocalInput(cam.wall, true);
+  const wall = nowShowing();
+  if (wall == null) return;
+  input.value = toLocalInput(wall, true);
   drawSelection();
 }
 
@@ -270,3 +436,4 @@ $('#export').addEventListener('click', async () => {
 setUpNav();
 init();
 subscribe(onEvent);
+requestAnimationFrame(followFrame);

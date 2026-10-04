@@ -9,7 +9,7 @@
 <body>
 <header>
   <h1>Timelapses</h1>
-  <nav><a href="./" aria-current="page">Player</a><a href="wall.html">Wall</a><a href="exports.html">Exports</a><a href="manage.html">Streams</a></nav>
+  <nav><a href="./" aria-current="page">Player</a><a href="exports.html">Exports</a><a href="manage.html">Streams</a></nav>
   <button id="logout" class="link" hidden>Log out</button>
 </header>
 <div class="stream-bar">
@@ -32,12 +32,16 @@
   </div>
 
   <section id="player" class="player" aria-label="Player">
-    <video id="video" muted playsinline></video>
+    <div class="screen">
+      <video id="video" muted playsinline></video>
+      <div id="overlay" class="video-overlay" hidden></div>
+    </div>
     <div class="controls">
       <button type="button" id="play" class="play" title="Play (space)"><span class="glyph">▶</span></button>
-      <span id="clock">–</span>
+      <button type="button" id="clock" title="Click to show how long it plays until the end">–</button>
       <span id="live" class="live" hidden><span class="dot"></span>LIVE · <span id="live-lag"></span></span>
       <button type="button" id="jump-live" hidden>Jump to newest</button>
+      <span id="sync-info" class="muted small" hidden></span>
       <span class="spacer"></span>
       <label class="muted">speed
         <select id="rate">
@@ -49,6 +53,9 @@
           <option value="8">8×</option>
         </select>
       </label>
+      <button type="button" id="sync" aria-pressed="false"
+        title="Play in step with the other tabs and windows that have sync on">Sync</button>
+      <button type="button" id="new-tab" title="Open another camera in a new tab, in step with this one">+ Tab</button>
       <button type="button" id="fullscreen" title="Fullscreen (f)">Fullscreen</button>
     </div>
     <div id="timeline" class="timeline"></div>
@@ -90,6 +97,7 @@
 <script src="timeline.js"></script>
 <script src="camplayer.js"></script>
 <script src="controls.js"></script>
+<script src="sync.js"></script>
 <script src="player.js"></script>
 </body>
 </html>

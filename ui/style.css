@@ -197,15 +197,26 @@ video {
   background: var(--bg);
 }
 
-.player:fullscreen > video,
-.player:fullscreen > .wall-grid {
+.player:fullscreen > .screen {
   flex: 1;
   min-height: 0;
-  width: 100%;
+  display: flex;
+}
+
+.player:fullscreen video {
+  flex: 1;
+  min-height: 0;
   aspect-ratio: auto;
+  object-fit: contain;
 }
 
 #clock {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
   font-size: 20px;
   font-variant-numeric: tabular-nums;
 }
@@ -543,73 +554,13 @@ tr.highlight {
   margin-left: 8px;
 }
 
-/* --- wall --- */
+/* --- notices over the picture --- */
 
-.pickers {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-}
-
-.pickers label {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.wall-grid {
-  display: grid;
-  gap: 4px;
-  grid-template-columns: 1fr 1fr;
-  background: #000;
-  cursor: pointer;
-}
-
-.wall-grid[data-count="1"] {
-  grid-template-columns: 1fr;
-}
-
-.tile {
+.screen {
   position: relative;
-  aspect-ratio: 16 / 9;
-  min-height: 0;
-  background: #000;
 }
 
-.player:fullscreen .tile {
-  aspect-ratio: auto;
-}
-
-.tile video {
-  display: block;
-  width: 100%;
-  height: 100%;
-  aspect-ratio: auto;
-  object-fit: contain;
-}
-
-.tile-label,
-.tile-open {
-  position: absolute;
-  top: 6px;
-  padding: 1px 8px;
-  border-radius: 4px;
-  background: rgb(0 0 0 / 55%);
-  color: #fff;
-  font-size: 12px;
-}
-
-.tile-label {
-  left: 6px;
-  pointer-events: none;
-}
-
-.tile-open {
-  right: 6px;
-  text-decoration: none;
-}
-
-.tile-overlay {
+.video-overlay {
   position: absolute;
   inset: 0;
   display: flex;

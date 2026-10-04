@@ -1,6 +1,6 @@
 // One camera's playback: an HLS playlist built server-side for a wall-clock range, and the
 // mapping between the video's position and wall-clock time, from the same segment list the
-// playlist was built from. The player page has one; the wall has one per camera.
+// playlist was built from.
 
 // Only for Safari's native HLS, which doesn't say when it reloads the playlist.
 const NATIVE_LIVE_REFRESH_MS = 10_000;
@@ -82,7 +82,7 @@ class CamPlayer {
   }
 
   attach(url, startPosition) {
-    // The segment list must cover everything the player can reach, or the wall clock would stall
+    // The segment list must cover everything the player can reach, or a synced clock would stall
     // on footage it doesn't know; so it is refreshed whenever a live playlist grows. (Entries are
     // keyframe parts, not segments, so only a change in their number says anything.)
     let fragments = null;
@@ -160,6 +160,13 @@ class CamPlayer {
     const next = this.segments[i];
     if (next.wall_start <= ms) return true;
     return i > 0 && next.wall_start - this.segments[i - 1].wall_end <= slack;
+  }
+
+  /** Wall-clock ms of footage after wall-clock `ms`, gaps left out. */
+  footageAfter(ms) {
+    let total = 0;
+    for (const s of this.segments) if (s.wall_end > ms) total += s.wall_end - Math.max(s.wall_start, ms);
+    return total;
   }
 
   /** Start of the first footage after wall-clock `ms`, or null. */

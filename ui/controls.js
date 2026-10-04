@@ -1,4 +1,4 @@
-// Playback controls shared by the player and the wall: a play/pause button, fullscreen of the
+// Playback controls for the player: a play/pause button, fullscreen of the
 // whole player (video, clock and timeline together), and keyboard shortcuts.
 //
 //   space / k     play or pause

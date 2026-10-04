@@ -22,20 +22,8 @@ favour of real HTTPS.
    - Mark the session cookie `Secure`.
    - Consider HSTS.
    - Stop publishing port 8080 on the LAN, if everything goes through the proxy.
-3. **Wake lock in the player and the wall.**
+3. **Wake lock in the player.**
    - Request `navigator.wakeLock.request('screen')` while playing and release it on pause.
    - Request it again on `visibilitychange`, because the browser drops it whenever the tab is
      hidden.
    - Show a short notice when the API is unavailable, instead of failing silently.
-
-## Deploy the latest image to miniserver
-
-miniserver still runs `43cb0d7`. Pushed since, with the image published but not deployed:
-
-- `4003e36`: wall cameras take their speed from their footage rather than their current settings.
-  Deploy this before changing any stream's speed (e.g. 5 → 3 frames per second for 10×).
-- 24-hour times throughout the UI.
-
-```sh
-cd /opt/timelapse && docker compose pull && docker compose up -d
-```
