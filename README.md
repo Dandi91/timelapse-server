@@ -13,13 +13,16 @@ the database. If a pipeline drops, it restarts with backoff in a new session.
   readout. The timeline under it shows footage and gaps in clock time. You can scroll to zoom,
   drag to pan, click to jump, and shift-drag to select a clip. Hovering shows the time and a
   thumbnail. Live mode follows new segments as they finish; it shows how far behind real time the
-  picture is, and the stretch still being recorded. Fullscreen covers the whole player, so the
-  clock and timeline come along. Keys: space plays and pauses, ←/→ jump 5 s of video (30 s with
-  shift), `,`/`.` step one frame, and `f` toggles fullscreen.
-- **Wall.** Up to four cameras side by side, all following one clock. Each camera keeps to the
-  clock, even across different recording speeds. A camera without footage at that moment shows
-  when its footage resumes. The timeline has one lane per camera. One selection can queue an
-  export for every camera.
+  picture is, and the stretch still being recorded. Clicking the clock switches it to the time left
+  until the end of the range. Fullscreen covers the whole player, so the clock and timeline come
+  along. Keys: space plays and pauses, ←/→ jump 5 s of video (30 s with shift), `,`/`.` step one
+  frame, and `f` toggles fullscreen. While it plays, the page keeps the screen awake; browsers
+  allow that only over HTTPS (or on localhost), and the player says so when it can't.
+- **Sync.** Turn on sync in several player tabs or windows, and they play in step on one clock,
+  so cameras can be watched side by side. Whichever tab was last used to play, pause, seek or
+  change speed leads; if it closes, another takes over. Each camera keeps to the clock, even
+  across different recording speeds, and one without footage at that moment shows when its
+  footage resumes. "+ Tab" opens the next camera in a new tab, in sync with this one.
 - **Exports.** Pick a range under the player (or mark it from the playback position) and export it
   as an mp4. Fast mode copies the video, so it takes seconds, and starts at the keyframe before
   the requested time. Exact mode re-encodes and cuts to the frame. A range that spans different
@@ -32,6 +35,10 @@ the database. If a pipeline drops, it restarts with backoff in a new session.
 Set `TIMELAPSE_PASSWORD` to require a login. Without it, anyone who can reach the port can manage
 streams, and the server warns when it listens beyond localhost. Logins last 30 days and survive
 restarts.
+
+For HTTPS, put a reverse proxy in front that sets `X-Forwarded-Proto`; the session cookie is then
+also marked Secure. The live updates on `/api/events` are server-sent events, so the proxy must
+not buffer responses (Caddy doesn't).
 
 ## Usage
 
