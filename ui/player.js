@@ -165,8 +165,9 @@ const controls = setUpControls({
 function clockSpeed() {
   return cam.loaded ? cam.speedAt(sync.wall()) : sync.wps / sync.rate;
 }
-video.addEventListener('play', controls.refresh);
-video.addEventListener('pause', controls.refresh);
+const updateWakeLock = keepAwake({ isPlaying: () => controls.isPlaying(), notice: $('#awake-note') });
+video.addEventListener('play', () => { controls.refresh(); updateWakeLock(); });
+video.addEventListener('pause', () => { controls.refresh(); updateWakeLock(); });
 
 $('#rate').addEventListener('change', (event) => {
   const rate = Number(event.target.value);
@@ -203,6 +204,7 @@ function followFrame() {
 
 function syncChanged() {
   controls.refresh();
+  updateWakeLock();
   $('#rate').value = String(sync.rate);
 }
 
@@ -225,6 +227,7 @@ function setSync(on) {
   $('#sync-info').hidden = !on;
   saveHash();
   controls.refresh();
+  updateWakeLock();
 }
 
 /**

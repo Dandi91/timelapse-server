@@ -52,5 +52,5 @@ function setUpControls({ root, playButton, fullscreenButton, clickTargets = [], 
     refresh();
   });
 
-  return { refresh };
+  return { refresh, isPlaying: actions.isPlaying };
 }
