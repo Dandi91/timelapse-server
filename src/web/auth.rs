@@ -1,14 +1,15 @@
 //! A single shared password, exchanged at the login page for a session cookie.
 //!
 //! The cookie is HttpOnly and SameSite=Strict, so other sites can neither read it nor make the
-//! browser send it with their requests. Only a hash of each session token is stored.
+//! browser send it with their requests. Behind an HTTPS proxy it is also Secure, so it never
+//! travels over plain HTTP. Only a hash of each session token is stored.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
@@ -73,7 +74,24 @@ pub(super) struct Login {
     password: String,
 }
 
-pub(super) async fn login(State(ctx): State<Arc<Ctx>>, Json(login): Json<Login>) -> Result<Response, AppError> {
+/// Whether the browser reached us over HTTPS, as reported by a reverse proxy in front. Plain HTTP
+/// stays usable for direct access on the LAN; spoofing the header only breaks one's own login.
+fn via_https(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .is_some_and(|proto| proto.as_bytes().eq_ignore_ascii_case(b"https"))
+}
+
+fn session_cookie(value: &str, max_age: i64, headers: &HeaderMap) -> String {
+    let secure = if via_https(headers) { "; Secure" } else { "" };
+    format!("{COOKIE}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure}")
+}
+
+pub(super) async fn login(
+    State(ctx): State<Arc<Ctx>>,
+    headers: HeaderMap,
+    Json(login): Json<Login>,
+) -> Result<Response, AppError> {
     let Some(expected) = &ctx.password_hash else {
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
@@ -87,10 +105,7 @@ pub(super) async fn login(State(ctx): State<Arc<Ctx>>, Json(login): Json<Login>)
     let token = hex(&raw);
     let expires = db::now_ms() + SESSION_DAYS * 86_400_000;
     db::create_web_session(&ctx.pool, &hex(&hash(&token)), expires).await?;
-    let cookie = format!(
-        "{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
-        SESSION_DAYS * 86_400
-    );
+    let cookie = session_cookie(&token, SESSION_DAYS * 86_400, &headers);
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response())
 }
 
@@ -98,7 +113,7 @@ pub(super) async fn logout(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> R
     if let Some(token) = session_token(&headers) {
         db::delete_web_session(&ctx.pool, &hex(&hash(token))).await?;
     }
-    let expired = HeaderValue::from_static("tl_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+    let expired = session_cookie("", 0, &headers);
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, expired)]).into_response())
 }
 
@@ -112,6 +127,7 @@ pub(super) async fn status(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderValue;
 
     #[test]
     fn finds_the_session_cookie_among_others() {
@@ -121,6 +137,16 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.append(header::COOKIE, HeaderValue::from_static("tl_sessionx=abc; tl_session="));
         assert_eq!(session_token(&headers), None);
+    }
+
+    #[test]
+    fn marks_the_cookie_secure_only_behind_https() {
+        let mut headers = HeaderMap::new();
+        assert!(!session_cookie("abc", 60, &headers).contains("Secure"));
+        headers.insert("x-forwarded-proto", HeaderValue::from_static("http"));
+        assert!(!session_cookie("abc", 60, &headers).contains("Secure"));
+        headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        assert!(session_cookie("abc", 60, &headers).ends_with("; Secure"));
     }
 
     #[test]
