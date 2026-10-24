@@ -1,6 +1,7 @@
 // The player page: one camera, a range picker, the timeline, live mode and the export form.
 // A link like `#stream=3&t=1791024466000` opens a stream at a wall-clock time; `&sync=1` turns on
-// sync, which plays it in step with the other tabs that have sync on (see sync.js).
+// sync, which plays it in step with the other tabs that have sync on (see sync.js), all showing
+// the same range.
 
 const video = $('#video');
 const cam = new CamPlayer(video, { onError: message, onUpdate: drawTimeline });
@@ -10,6 +11,8 @@ let liveClock = null;
 let streams = [];
 /** Set while a tab opened with sync on is loading, before it joins: it mustn't start on its own. */
 let syncPending = false;
+/** The range showing (see `newRange`). */
+let shownRange = null;
 
 const sync = new SyncClock({ probe: (wall) => probeCam(cam, wall), onChange: syncChanged });
 
@@ -211,13 +214,21 @@ function syncChanged() {
   controls.refresh();
   updateWakeLock();
   $('#rate').value = String(sync.rate);
+  // Another tab picked a range, or this one joined tabs showing another.
+  const range = sync.range;
+  if (range && !sameRange(range, shownRange)) showRange(range, { chosen: false });
 }
 
 function setSync(on) {
   if (on === sync.enabled) return;
   syncPending = false;
   if (on) {
-    sync.enable({ wall: cam.loaded ? cam.wall : null, playing: cam.loaded && !video.paused, rate: Number($('#rate').value) });
+    sync.enable({
+      wall: cam.loaded ? cam.wall : null,
+      playing: cam.loaded && !video.paused,
+      rate: Number($('#rate').value),
+      range: shownRange,
+    });
   } else {
     // Carry on from here at the same speed, on its own.
     const { playing, rate } = sync;
@@ -272,6 +283,7 @@ async function loadStream(stream, { from = null, to = null, live = false, startA
   clearInterval(liveClock);
   message('');
   const found = await cam.load(stream, { from, to, live, startAt });
+  if (found === null) return; // superseded meanwhile
   if (!found) {
     $('#clock').textContent = '–';
     timeline.setData({ lanes: [], from: from ?? Date.now() - 60 * MINUTE_MS, to: to ?? Date.now() });
@@ -319,16 +331,32 @@ function toLocalInput(ms, seconds = false) {
   return date.toISOString().slice(0, seconds ? 19 : 16);
 }
 
-async function showRange(button, { startAt = null, chosen = true } = {}) {
+/**
+ * A range to show: `key` is a range button's `data-range` ('all', 'live' or a span in ms back
+ * from now), or 'custom' with `from` and `to`. Each pick gets its own `id`, so in sync picking the
+ * same range again reloads it everywhere.
+ */
+function newRange(key, from = null, to = null) {
+  return { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, key, from, to };
+}
+
+/** `chosen`: the user picked this range here, so in sync every tab shows it and the clock may move. */
+async function showRange(range, { startAt = null, chosen = true } = {}) {
   const stream = currentStream();
   if (!stream) return;
-  setActive(button);
-  const range = button.dataset.range;
+  shownRange = range;
+  if (chosen && sync.enabled) sync.setRange(range);
+  const { key } = range;
+  setActive(key === 'custom' ? $('#load-custom') : document.querySelector(`.ranges button[data-range="${key}"]`));
   try {
-    if (range === 'all') await loadStream(stream, { startAt }, chosen);
-    else if (range === 'live') await loadStream(stream, { from: Date.now() - 60 * MINUTE_MS, live: true }, chosen);
-    else await loadStream(stream, { from: Date.now() - Number(range), to: Date.now(), startAt }, chosen);
-    if (cam.loaded) {
+    if (key === 'all') await loadStream(stream, { startAt }, chosen);
+    else if (key === 'live') await loadStream(stream, { from: Date.now() - 60 * MINUTE_MS, live: true }, chosen);
+    else if (key === 'custom') await loadStream(stream, { from: range.from, to: range.to, startAt }, chosen);
+    else await loadStream(stream, { from: Date.now() - Number(key), to: Date.now(), startAt }, chosen);
+    if (key === 'custom') {
+      $('#from').value = toLocalInput(range.from);
+      $('#to').value = toLocalInput(range.to);
+    } else if (cam.loaded) {
       $('#from').value = toLocalInput(cam.from);
       $('#to').value = toLocalInput(cam.to);
     }
@@ -338,22 +366,17 @@ async function showRange(button, { startAt = null, chosen = true } = {}) {
 }
 
 document.querySelectorAll('.ranges button[data-range]').forEach((button) => {
-  button.addEventListener('click', () => showRange(button));
+  button.addEventListener('click', () => showRange(newRange(button.dataset.range)));
 });
 
-$('#load-custom').addEventListener('click', async () => {
+$('#load-custom').addEventListener('click', () => {
   const from = Date.parse($('#from').value);
   const to = Date.parse($('#to').value);
   if (Number.isNaN(from) || Number.isNaN(to) || to <= from) {
     message('Pick a start before the end.');
     return;
   }
-  setActive($('#load-custom'));
-  try {
-    await loadStream(currentStream(), { from, to }, true);
-  } catch (error) {
-    message(String(error));
-  }
+  showRange(newRange('custom', from, to));
 });
 
 /** The link to this tab: its stream, and whether it's in sync. */
@@ -364,7 +387,8 @@ function saveHash() {
 $('#stream').addEventListener('change', () => {
   saveHash();
   $('#stream-info').textContent = describe(currentStream());
-  showRange(document.querySelector('.ranges button[data-range="all"]'));
+  // A camera switched to shows the same range (in sync, the shared one).
+  showRange(shownRange ?? newRange('all'), { chosen: false });
 });
 
 async function init() {
@@ -388,7 +412,7 @@ async function init() {
   $('#stream-info').textContent = describe(initial);
   const startAt = Number(params.get('t')) || null;
   syncPending = params.get('sync') === '1' && SyncClock.supported;
-  await showRange(document.querySelector('.ranges button[data-range="all"]'), { startAt, chosen: false });
+  await showRange(newRange('all'), { startAt, chosen: false });
   if (syncPending) setSync(true);
 }
 

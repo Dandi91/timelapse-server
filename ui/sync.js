@@ -9,6 +9,9 @@
 // loading, skips stretches where no camera has footage, and stops at the newest footage (or, live,
 // waits there for more). If the leader closes or goes quiet, another tab takes over.
 //
+// The clock also carries the range picked above the player, so every tab shows the same stretch
+// of time; a tab joining takes on the range in use.
+//
 // At 1× the clock runs at the speed of the leader's footage (or, where it has none, of the first
 // camera that has), so 1× means "this camera's own pace" in the tab being used.
 
@@ -32,7 +35,8 @@ const MAX_NUDGE = 0.25;
 class SyncClock {
   /**
    * `probe(wall)` describes this tab's camera at wall-clock `wall`:
-   * {footage, loading, speed, next, end, live}. `onChange()` runs when play state or speed change.
+   * {footage, loading, speed, next, end, live}. `onChange()` runs when play state, speed or range
+   * change.
    */
   constructor({ probe, onChange = () => {} }) {
     this.id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -74,6 +78,11 @@ class SyncClock {
     return this.clock?.rate ?? this.initial?.rate ?? 1;
   }
 
+  /** The range every tab shows, as `setRange` was given it, or null before one is known. */
+  get range() {
+    return this.clock?.range ?? this.initial?.range ?? null;
+  }
+
   /** Wall-clock ms per real second. */
   get wps() {
     return this.clock?.wps ?? 6000 * this.rate;
@@ -92,7 +101,10 @@ class SyncClock {
     return c.wall + (c.advancing ? ((now - c.at) * c.wps) / 1000 : 0);
   }
 
-  /** Join the tabs in sync; if there are none, start a clock from `initial` = {wall, playing, rate}. */
+  /**
+   * Join the tabs in sync; if there are none, start a clock from `initial` = {wall, playing, rate,
+   * range}.
+   */
   enable(initial) {
     if (this.enabled) return;
     this.enabled = true;
@@ -132,6 +144,9 @@ class SyncClock {
 
   setRate(rate) { this.lead({ rate }); }
 
+  /** Show `range` in every tab: any value with an `id` of its own, by which tabs tell ranges apart. */
+  setRange(range) { this.lead({ range }); }
+
   /** Become the leader, with the clock as it is now changed by `changes`. */
   lead(changes = {}) {
     if (!this.enabled) return;
@@ -139,7 +154,7 @@ class SyncClock {
     const now = Date.now();
     const c = this.clock;
     const base = c
-      ? { wall: this.wall(now), playing: c.playing, rate: c.rate, wps: c.wps }
+      ? { wall: this.wall(now), playing: c.playing, rate: c.rate, wps: c.wps, range: c.range }
       : { ...this.initial, wall: this.initial?.wall ?? now };
     const next = { ...base, ...changes };
     this.setClock({
@@ -151,6 +166,7 @@ class SyncClock {
       advancing: false,
       rate: next.rate ?? 1,
       wps: next.wps ?? 6000 * (next.rate ?? 1),
+      range: next.range ?? null,
     });
     this.decide(true);
   }
@@ -244,7 +260,8 @@ class SyncClock {
   setClock(clock) {
     const before = this.clock;
     this.clock = clock;
-    if (!before || before.playing !== clock.playing || before.rate !== clock.rate) this.onChange();
+    if (!before || before.playing !== clock.playing || before.rate !== clock.rate
+      || !sameRange(before.range, clock.range)) this.onChange();
   }
 
   prune() {
@@ -259,6 +276,11 @@ class SyncClock {
     this.channel.postMessage({ ...msg, from: this.id });
     this.sent = Date.now();
   }
+}
+
+/** Ranges come back from other tabs as copies, so they are told apart by their `id`. */
+function sameRange(a, b) {
+  return (a?.id ?? null) === (b?.id ?? null);
 }
 
 /** What `cam` can show at `wall`, for `SyncClock`'s probe. */

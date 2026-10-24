@@ -20,6 +20,7 @@ class CamPlayer {
     this.hls = null;
     this.timer = null;
     this.refreshing = false;
+    this.loading = null;
   }
 
   get loaded() {
@@ -39,10 +40,13 @@ class CamPlayer {
 
   /**
    * Load `stream` for a wall-clock window; `live` follows new segments as they finish.
-   * Returns false when there is no footage in the window. `startAt` is a wall-clock time to
-   * start from; by default the start, or the newest footage when live.
+   * Returns false when there is no footage in the window, and null when a later load superseded
+   * this one. `startAt` is a wall-clock time to start from; by default the start, or the newest
+   * footage when live.
    */
   async load(stream, { from = null, to = null, live = false, startAt = null } = {}) {
+    const token = {};
+    this.loading = token;
     this.unload();
     this.stream = stream;
     this.live = live;
@@ -50,7 +54,7 @@ class CamPlayer {
     if (from != null) query.set('from', Math.round(from));
     if (to != null) query.set('to', Math.round(to));
     const segments = await api(`api/streams/${stream.id}/segments?${query}`);
-    if (this.stream !== stream) return false; // superseded meanwhile
+    if (this.loading !== token) return null;
     this.setSegments(segments);
     if (!this.loaded) return false;
     // Live shows from the footage on, not an empty stretch before a stream that just started.

@@ -19,8 +19,9 @@ the database. If a pipeline drops, it restarts with backoff in a new session.
   frame, and `f` toggles fullscreen. While it plays, the page keeps the screen awake; browsers
   allow that only over HTTPS (or on localhost), and the player says so when it can't.
 - **Sync.** Turn on sync in several player tabs or windows, and they play in step on one clock,
-  so cameras can be watched side by side. Whichever tab was last used to play, pause, seek or
-  change speed leads; if it closes, another takes over. Each camera keeps to the clock, even
+  so cameras can be watched side by side, all showing the range picked in any of them (a tab
+  joining takes on the range in use). Whichever tab was last used to play, pause, seek, change
+  speed or pick a range leads; if it closes, another takes over. Each camera keeps to the clock, even
   across different recording speeds, and one without footage at that moment shows when its
   footage resumes. "+ Tab" opens the next camera in a new tab, in sync with this one.
 - **Exports.** Pick a range under the player (or mark it from the playback position) and export it
