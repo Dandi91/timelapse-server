@@ -172,8 +172,13 @@ video.addEventListener('pause', () => { controls.refresh(); updateWakeLock(); })
 $('#rate').addEventListener('change', (event) => {
   const rate = Number(event.target.value);
   if (sync.enabled) sync.setRate(rate);
-  else video.playbackRate = rate;
+  else setVideoRate(rate);
 });
+// Loading a new source resets the rate to the default one, so both are set.
+function setVideoRate(rate) {
+  video.defaultPlaybackRate = rate;
+  video.playbackRate = rate;
+}
 // In sync the video's rate is steered to the clock; the menu shows the clock's.
 video.addEventListener('ratechange', () => {
   if (sync.enabled) return;
@@ -218,7 +223,7 @@ function setSync(on) {
     const { playing, rate } = sync;
     sync.disable();
     showOverlay(null);
-    video.playbackRate = rate;
+    setVideoRate(rate);
     if (playing && cam.loaded) video.play().catch(() => {});
     else video.pause();
   }
