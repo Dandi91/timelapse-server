@@ -68,6 +68,7 @@ pub async fn fixture_ctx(fetcher_script: &str) -> (Ctx, TempDir) {
         retry_max: Duration::from_secs(1),
         good_run: Duration::from_secs(60),
         offline_retry: Duration::from_secs(1),
+        stall_after: Duration::from_secs(2),
         poll_interval: Duration::from_millis(200),
         retention_interval: Duration::from_millis(500),
         min_free_bytes: 0,

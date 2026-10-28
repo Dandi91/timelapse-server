@@ -34,6 +34,8 @@ pub struct Tuning {
     pub good_run: Duration,
     /// How long to wait before checking an offline stream again.
     pub offline_retry: Duration,
+    /// A recorder whose source sends no video for this long, once it has started, is restarted.
+    pub stall_after: Duration,
     /// How often the server rereads the stream list.
     pub poll_interval: Duration,
     pub retention_interval: Duration,
@@ -50,6 +52,7 @@ impl Default for Tuning {
             retry_max: Duration::from_secs(120),
             good_run: Duration::from_secs(120),
             offline_retry: Duration::from_secs(300),
+            stall_after: Duration::from_secs(90),
             poll_interval: Duration::from_secs(5),
             retention_interval: Duration::from_secs(60),
             min_free_bytes: 5 << 30,

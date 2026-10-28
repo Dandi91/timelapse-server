@@ -5,7 +5,8 @@ timelapses, prunes old footage per stream by size or recorded time, and keeps it
 
 Each stream runs `yt-dlp -o - | ffmpeg`. ffmpeg keeps every Nth frame, re-times the result and
 writes MPEG-TS segments. It reports each finished segment on stdout, and the server records it in
-the database. If a pipeline drops, it restarts with backoff in a new session.
+the database. If a pipeline drops, or its source sends no video for 90 seconds, it restarts with
+backoff in a new session.
 
 `serve` also serves a web UI on `--bind` (default `127.0.0.1:8080`):
 

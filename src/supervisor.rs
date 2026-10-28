@@ -13,8 +13,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStderr, Command};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -109,7 +109,7 @@ pub async fn attempt(ctx: &Ctx, stream: &Stream, cancel: &CancellationToken) -> 
         .spawn()
         .with_context(|| format!("starting {}", ctx.tools.yt_dlp.display()))?;
     let fetcher_group = Pid::from_raw(fetcher.id().context("yt-dlp exited at once")? as i32);
-    let video: Stdio = fetcher.stdout.take().context("no yt-dlp stdout")?.try_into()?;
+    let video = fetcher.stdout.take().context("no yt-dlp stdout")?;
     let tee = tokio::spawn(tee_fetcher_log(
         fetcher.stderr.take().context("no yt-dlp stderr")?,
         fetch_log,
@@ -118,7 +118,7 @@ pub async fn attempt(ctx: &Ctx, stream: &Stream, cancel: &CancellationToken) -> 
 
     let encoder = Command::new(&ctx.tools.ffmpeg)
         .args(pipeline::encode_args(settings, &dir))
-        .stdin(video)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(log)
         .kill_on_drop(true)
@@ -130,6 +130,11 @@ pub async fn attempt(ctx: &Ctx, stream: &Stream, cancel: &CancellationToken) -> 
             return Err(e).with_context(|| format!("starting {}", ctx.tools.ffmpeg.display()));
         }
     };
+    let encoder_in = encoder.stdin.take().context("no ffmpeg stdin")?;
+    let stall_after = ctx.tuning.stall_after;
+    let mut relay = tokio::spawn(relay_video(video, encoder_in, stall_after));
+    let mut relay_done = false;
+    let mut stalled = false;
     // Recorded so a restart after a crash can wind down a pipeline that outlived us.
     let pids = (fetcher.id(), encoder.id());
     if let (Some(fetcher_pid), Some(encoder_pid)) = pids
@@ -158,6 +163,16 @@ pub async fn attempt(ctx: &Ctx, stream: &Stream, cancel: &CancellationToken) -> 
             _ = cancel.cancelled(), if stage == Stage::Running => {
                 let _ = killpg(fetcher_group, Signal::SIGTERM);
                 (stage, deadline) = (Stage::FetcherTerm, Some(Instant::now() + Duration::from_secs(15)));
+            }
+            // The relay has closed ffmpeg's input by now, so ffmpeg finishes the segment in flight.
+            result = &mut relay, if !relay_done => {
+                relay_done = true;
+                if matches!(result, Ok(Relay::Stalled)) && stage == Stage::Running {
+                    warn!(stream = stream.label, "no video for {stall_after:.0?}, restarting the pipeline");
+                    stalled = true;
+                    let _ = killpg(fetcher_group, Signal::SIGTERM);
+                    (stage, deadline) = (Stage::FetcherTerm, Some(Instant::now() + Duration::from_secs(15)));
+                }
             }
             _ = sleep_until(deadline.unwrap_or_else(far_future)), if deadline.is_some() => {
                 (stage, deadline) = match stage {
@@ -193,6 +208,7 @@ pub async fn attempt(ctx: &Ctx, stream: &Stream, cancel: &CancellationToken) -> 
     }
     let encoder_status = encoder.wait().await.ok();
     reap_group(&mut fetcher, fetcher_group).await;
+    relay.abort();
     let fetch = timeout(Duration::from_secs(5), tee)
         .await
         .ok()
@@ -209,6 +225,8 @@ pub async fn attempt(ctx: &Ctx, stream: &Stream, cancel: &CancellationToken) -> 
         Outcome::Offline(fetch.last_error.unwrap_or_else(|| "not live".into()))
     } else if cancel.is_cancelled() {
         Outcome::Ended("cancelled".into())
+    } else if stalled {
+        Outcome::Ended(format!("stalled: no video for {}s", stall_after.as_secs()))
     } else {
         Outcome::Ended(fetch.last_error.unwrap_or_else(|| match encoder_status {
             Some(status) => format!("ffmpeg exited ({status})"),
@@ -249,6 +267,41 @@ async fn reap_group(fetcher: &mut Child, group: Pid) {
             // The leader is gone; make sure no grandchild outlives it.
             let _ = killpg(group, Signal::SIGKILL);
             return;
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Relay {
+    /// The fetcher closed its output, or ffmpeg stopped reading.
+    Ended,
+    Stalled,
+}
+
+/// Copy the video from yt-dlp to ffmpeg, watching that it keeps coming. A fetcher can hang on a
+/// dead connection without exiting (ffmpeg's HLS reader has no read timeout), which would leave
+/// the stream "recording" forever. Live video arrives every few seconds, so a long silence is a
+/// stall, but only once data has flowed: before that, yt-dlp may be waiting for an upcoming stream.
+async fn relay_video(mut from: ChildStdout, mut to: ChildStdin, stall_after: Duration) -> Relay {
+    let mut buf = vec![0; 256 << 10];
+    let mut flowing = false;
+    loop {
+        let read = if flowing {
+            match timeout(stall_after, from.read(&mut buf)).await {
+                Ok(read) => read,
+                Err(_) => return Relay::Stalled,
+            }
+        } else {
+            from.read(&mut buf).await
+        };
+        match read {
+            Ok(0) | Err(_) => return Relay::Ended,
+            Ok(n) => {
+                flowing = true;
+                if to.write_all(&buf[..n]).await.is_err() {
+                    return Relay::Ended;
+                }
+            }
         }
     }
 }

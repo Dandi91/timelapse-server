@@ -121,6 +121,50 @@ async fn failing_fetcher_is_retried_with_status() {
 }
 
 #[tokio::test]
+async fn stalled_fetcher_is_restarted() {
+    // Two segments' worth of video, then the fetcher hangs with its stdout still open, like yt-dlp's
+    // ffmpeg stuck on a dead connection.
+    let f = fixture(&format!(
+        "{}\nexec sleep 600",
+        pattern_source(12, false).trim_start_matches("exec ")
+    ))
+    .await;
+    let stream = add_stream(&f.ctx, "cam").await;
+
+    let started = Instant::now();
+    let report = supervisor::attempt(&f.ctx, &stream, &CancellationToken::new())
+        .await
+        .unwrap();
+    // The stall timeout is 2 s, counted from the last byte.
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed > Duration::from_secs(2) && elapsed < Duration::from_secs(10),
+        "took {elapsed:?}"
+    );
+    match &report.outcome {
+        Outcome::Ended(detail) => assert!(detail.starts_with("stalled"), "{detail}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(report.segments, 2, "the segment in flight is finalized too");
+}
+
+#[tokio::test]
+async fn quiet_fetcher_is_not_a_stall_before_video_starts() {
+    // Waiting for an upcoming stream: nothing for longer than the stall timeout, then video.
+    let f = fixture(&format!("sleep 4\n{}", pattern_source(6, false))).await;
+    let stream = add_stream(&f.ctx, "cam").await;
+
+    let report = supervisor::attempt(&f.ctx, &stream, &CancellationToken::new())
+        .await
+        .unwrap();
+    match &report.outcome {
+        Outcome::Ended(detail) => assert!(!detail.starts_with("stalled"), "{detail}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(report.segments, 1);
+}
+
+#[tokio::test]
 async fn server_follows_the_stream_table() {
     let f = fixture(&pattern_source(600, true)).await;
     let shutdown = CancellationToken::new();

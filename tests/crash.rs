@@ -1,5 +1,5 @@
-//! A server killed with SIGKILL leaves its pipeline running. The next startup must wind it down
-//! gracefully and adopt the segment it was writing.
+//! A server killed with SIGKILL leaves its pipeline behind. The next startup must wind it down
+//! and adopt the segment it was writing.
 
 mod common;
 
@@ -65,11 +65,10 @@ async fn restart_adopts_the_segment_a_crash_left_in_flight() {
     let pipeline = db::open_pipelines(&f.ctx.pool).await.unwrap().remove(0);
     let encoder = Identity::parse(pipeline.encoder.as_deref().unwrap()).unwrap();
     let fetcher = Identity::parse(pipeline.fetcher.as_deref().unwrap()).unwrap();
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    assert!(
-        encoder.is_running(),
-        "the orphaned encoder keeps recording until the restart"
-    );
+    // The video ran through the server, so the encoder sees EOF and finishes its segment; the
+    // fetcher may linger, waiting on a stream, until the restart winds it down.
+    let finished = wait_for(Duration::from_secs(10), || async { !encoder.is_running() }).await;
+    assert!(finished, "the orphaned encoder finishes on its own");
 
     let report = reconcile::run(&f.ctx).await.unwrap();
     assert_eq!(report.adopted, 1, "{report:?}");
