@@ -22,7 +22,7 @@ const COOKIE: &str = "tl_session";
 const SESSION_DAYS: i64 = 30;
 
 /// Reachable without a session: the login page and what it needs.
-const PUBLIC: &[&str] = &["/login.html", "/style.css", "/api/login", "/api/auth"];
+const PUBLIC: &[&str] = &["/login.html", "/style.css", "/favicon.svg", "/api/login", "/api/auth"];
 
 pub fn hash(secret: &str) -> [u8; 32] {
     Sha256::digest(secret.as_bytes()).into()
