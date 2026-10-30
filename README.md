@@ -3,10 +3,10 @@
 Records livestreams (YouTube or anything else yt-dlp supports) around the clock as segmented
 timelapses, prunes old footage per stream by size or recorded time, and keeps its index in SQLite.
 
-Each stream runs `yt-dlp -o - | ffmpeg`. ffmpeg keeps every Nth frame, re-times the result and
-writes MPEG-TS segments. It reports each finished segment on stdout, and the server records it in
-the database. If a pipeline drops, or its source sends no video for 90 seconds, it restarts with
-backoff in a new session.
+Each stream runs yt-dlp into ffmpeg (`yt-dlp -o - | ffmpeg`, with the server relaying the video
+between them). ffmpeg keeps every Nth frame, re-times the result and writes MPEG-TS segments. It
+reports each finished segment on stdout, and the server records it in the database. If a pipeline
+drops, or its source sends no video for 90 seconds, it restarts with backoff in a new session.
 
 `serve` also serves a web UI on `--bind` (default `127.0.0.1:8080`):
 
@@ -16,9 +16,9 @@ backoff in a new session.
   thumbnail. Live mode follows new segments as they finish; it shows how far behind real time the
   picture is, and the stretch still being recorded. Clicking the clock switches it to the time left
   until the end of the range. Fullscreen covers the whole player, so the clock and timeline come
-  along. Keys: space plays and pauses, ←/→ jump 5 s of video (30 s with shift), `,`/`.` step one
-  frame, and `f` toggles fullscreen. While it plays, the page keeps the screen awake; browsers
-  allow that only over HTTPS (or on localhost), and the player says so when it can't.
+  along. Keys: space (or `k`) plays and pauses, ←/→ jump 5 s of video (30 s with shift), `,`/`.`
+  step one frame, and `f` toggles fullscreen. While it plays, the page keeps the screen awake;
+  browsers allow that only over HTTPS (or on localhost), and the player says so when it can't.
 - **Sync.** Turn on sync in several player tabs or windows, and they play in step on one clock,
   so cameras can be watched side by side, all showing the range picked in any of them (a tab
   joining takes on the range in use). Whichever tab was last used to play, pause, seek, change
@@ -49,10 +49,13 @@ timelapse-server add 'https://www.youtube.com/watch?v=FHJH2yMe6Hw' --label bridg
     --sample-fps 5 --max-size 50G --max-duration 7d
 timelapse-server serve          # records every enabled stream until SIGTERM/Ctrl+C
 timelapse-server list           # status, speed, storage per stream
-timelapse-server segments bridges
+timelapse-server segments bridges --last 50   # newest segments (20 by default)
 timelapse-server set bridges --crf 23 --disable
 timelapse-server rm bridges     # also deletes its recordings
 ```
+
+`set` changes only the options given. Besides the settings below, it takes `--url`, `--rename`,
+`--enable`/`--disable` and `--live-only`/`--allow-vod`.
 
 `serve` picks up `add`/`set`/`rm` within a few seconds. Changes to the URL or encode settings
 restart that stream's recorder. Changes to retention limits don't.
@@ -87,7 +90,7 @@ Global options are also available as environment variables:
 ### HTTP API
 
 Once a password is set, everything except the login page needs the session cookie from
-`POST /api/login`.
+`POST /api/login` (`{password}`); `POST /api/logout` ends the session.
 
 | Endpoint | Returns |
 |---|---|
@@ -112,11 +115,11 @@ Once a password is set, everything except the login page needs the session cooki
 ### Data directory
 
 ```
-data/timelapse.db                         streams, sessions, segments
-data/streams/<stream>/capture.log         yt-dlp and ffmpeg messages (rotated at 5 MB)
-data/streams/<stream>/<session>/000000.ts segments
-data/streams/<stream>/<session>/000000.jpg keyframe thumbnails of that segment, one tile per keyframe
-data/exports/<id>.mp4                     finished exports
+data/timelapse.db                             streams, sessions, segments
+data/streams/<stream-id>/capture.log          yt-dlp and ffmpeg messages (rotated at 5 MB)
+data/streams/<stream-id>/<session>/000000.ts  segments
+data/streams/<stream-id>/<session>/000000.jpg keyframe thumbnails of that segment, one tile per keyframe
+data/exports/<id>.mp4                         finished exports
 ```
 
 Each finished segment is post-processed in the background, newest first. Its keyframes are
